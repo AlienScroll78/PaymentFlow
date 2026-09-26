@@ -48,7 +48,9 @@
       "^react-dom/(.*)$": "<rootDir>/node_modules/react-dom/$1",
       "^axios$": "<rootDir>/tests/__stubs__/axios.js",
       "^next/router$": "<rootDir>/tests/__stubs__/next-router.js",
-      "^next/link$": "<rootDir>/tests/__stubs__/next-link.js"
+      "^next/link$": "<rootDir>/tests/__stubs__/next-link.js",
+      "^react-i18next$": "<rootDir>/tests/__stubs__/react-i18next.js",
+      "^qrcode\\.react$": "<rootDir>/tests/__stubs__/qrcode.react.js"
     },
     "transform": {
       "^.+\\.[jt]sx?$": "babel-jest"

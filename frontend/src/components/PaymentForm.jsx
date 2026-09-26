@@ -49,6 +49,7 @@ function InfoRow({ label, children }) {
 }
 
 export default function PaymentForm({ initialStudentId = "" }) {
+  const { t } = useTranslation();
   const [studentId, setStudentId]             = useState(initialStudentId);
   const [shareCopied, setShareCopied]         = useState(false);
   const [student, setStudent]                 = useState(null);
@@ -228,7 +229,6 @@ export default function PaymentForm({ initialStudentId = "" }) {
   }
 
   const isTestnet = process.env.NEXT_PUBLIC_STELLAR_NETWORK === "testnet";
-  const { t } = useTranslation();
 
   return (
     <>
