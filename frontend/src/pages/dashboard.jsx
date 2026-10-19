@@ -13,6 +13,7 @@ import {
   IconSearch, IconChevronLeft, IconChevronRight,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
+import FilterChips from "../components/FilterChips";
 
 const PAGE_SIZE = 20;
 
@@ -400,6 +401,42 @@ function Dashboard() {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Filter chip bar — Issue #355: show active filters as removable chips */}
+          <div style={{ paddingLeft: "1.25rem", paddingRight: "1.25rem" }}>
+            <FilterChips
+              filters={[
+                {
+                  key: "search",
+                  label: t("dashboard.searchLabel"),
+                  value: debouncedSearch,
+                  displayValue: debouncedSearch,
+                },
+                {
+                  key: "status",
+                  label: t("dashboard.statusLabel"),
+                  value: statusFilter === "all" ? "" : statusFilter,
+                  displayValue: statusFilter === "all" ? "" : t(`status.student.${statusFilter}`, { defaultValue: statusFilter }),
+                },
+                {
+                  key: "class",
+                  label: t("dashboard.classLabel"),
+                  value: classFilter,
+                  displayValue: classFilter,
+                },
+              ]}
+              onRemove={(key) => {
+                if (key === "search")  setSearch("");
+                if (key === "status")  setStatusFilter("all");
+                if (key === "class")   setClassFilter("");
+              }}
+              onClearAll={() => {
+                setSearch("");
+                setStatusFilter("all");
+                setClassFilter("");
+              }}
+            />
           </div>
 
           {/* Table */}
