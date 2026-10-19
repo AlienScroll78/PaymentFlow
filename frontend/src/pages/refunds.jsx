@@ -4,6 +4,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconChevronLeft, IconChevronRight } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import ConfirmDialog, { CONFIRM_TIER } from "../components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 
 const STATUS_META = {
@@ -25,18 +26,19 @@ function StatusBadge({ status }) {
 
 function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
   const { t } = useTranslation();
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [note, setNote] = useState("");
+  const [submitting, setSubmitting]       = useState(false);
+  const [error, setError]                 = useState(null);
+  const [note, setNote]                   = useState("");
+  const [showConfirm, setShowConfirm]     = useState(false);
 
   const canApprove = refund.initiatedBy !== user?.email && refund.status === "approval_pending";
 
-  async function handleApprove(e) {
-    e.preventDefault();
+  async function handleApprove() {
     if (!canApprove) return;
 
     setError(null);
     setSubmitting(true);
+    setShowConfirm(false);
     try {
       await approveRefund(refund._id, { note });
       onApproved();
@@ -67,18 +69,33 @@ function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
   }
 
   return (
-    <form onSubmit={handleApprove} style={{
-      padding: "0.75rem",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius-sm)",
-      background: "var(--bg-subtle)",
-    }}>
+    <>
+      <ConfirmDialog
+        open={showConfirm}
+        tier={CONFIRM_TIER.HIGH}
+        title={t("refunds.approveRefund")}
+        description={t("refunds.approveConfirmDesc", { studentId: refund.studentId, amount: refund.amount })}
+        confirmPhrase="approve refund"
+        confirmLabel={t("refunds.approveRefund")}
+        cancelLabel={t("actions.cancel")}
+        onConfirm={handleApprove}
+        onCancel={() => setShowConfirm(false)}
+        loading={submitting}
+      />
+
+      <form onSubmit={(e) => { e.preventDefault(); setShowConfirm(true); }} style={{
+        padding: "0.75rem",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        background: "var(--bg-subtle)",
+      }}>
       {error && (
         <div style={{
           marginBottom: "0.75rem",
           padding: "0.5rem 0.75rem",
-          background: "var(--danger-subtle)",
-          color: "var(--danger)",
+          background: "var(--danger-bg)",
+          color: "var(--danger-text)",
+          border: "1px solid var(--danger-border)",
           borderRadius: "var(--radius-sm)",
           fontSize: "0.8125rem",
         }}>
@@ -160,6 +177,7 @@ function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
         </button>
       </div>
     </form>
+    </>
   );
 }
 
