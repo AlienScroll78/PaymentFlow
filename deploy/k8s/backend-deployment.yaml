@@ -61,22 +61,42 @@ spec:
                   key: MONGO_URI
             - name: REDIS_HOST
               value: "redis"
+          # Readiness probe: routes traffic only when DB and Horizon are reachable.
+          # Uses /health/ready which performs full dependency checks (DB, Stellar).
+          # A failing readiness probe removes the pod from the load balancer without
+          # restarting it — correct behaviour when upstream dependencies are down.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Liveness probe: restarts the pod if the process is deadlocked or hung.
+          # Uses /health/live which only checks process responsiveness (no I/O).
+          # Higher initialDelaySeconds gives the app time to fully start up before
+          # the kubelet starts evaluating liveness.
+          livenessProbe:
+            httpGet:
+              path: /health/live
               port: 5000
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-          livenessProbe:
+
+          # Startup probe: prevents liveness from killing a slow-starting pod.
+          # Allows up to 60 s (6 checks × 10 s) for migrations + DB connect.
+          # Once it succeeds once, the liveness probe takes over.
+          startupProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: 5000
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: "250m"
