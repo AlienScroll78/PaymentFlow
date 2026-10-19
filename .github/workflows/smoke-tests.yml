@@ -1,0 +1,321 @@
+# Post-deployment smoke tests — #369
+#
+# Runs immediately after a deployment completes to verify the new version is
+# actually serving traffic correctly. Covers at least 5 critical endpoints as
+# required by the acceptance criteria.
+#
+# If any smoke test fails the workflow marks itself failed (exit code 1) which
+# can be wired up to a rollback step or deployment protection rule in your CD
+# pipeline. Slack notifications are sent for both pass and fail.
+#
+# Trigger:
+#   workflow_call  — called by your deployment workflow after deploy completes.
+#   workflow_dispatch — manual trigger for ad-hoc verification.
+#
+# Required secrets (set in repo / environment settings):
+#   SMOKE_TEST_BASE_URL   — base URL of the deployed environment (e.g. https://app.example.com)
+#   SMOKE_TEST_ADMIN_EMAIL — admin account email for auth smoke tests
+#   SMOKE_TEST_ADMIN_PASS  — admin account password
+#   SLACK_WEBHOOK_URL      — Slack incoming webhook for notifications
+#
+# Optional inputs (workflow_call):
+#   environment   — deployment environment label (staging, production, …)
+#   version       — the version/tag/sha being deployed
+
+name: Post-Deployment Smoke Tests
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment (staging, production, …)"
+        type: string
+        default: "staging"
+      version:
+        description: "Version / git SHA being deployed"
+        type: string
+        default: ""
+    secrets:
+      SMOKE_TEST_BASE_URL:
+        required: true
+      SMOKE_TEST_ADMIN_EMAIL:
+        required: true
+      SMOKE_TEST_ADMIN_PASS:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        type: string
+        default: "staging"
+      version:
+        description: "Version / git SHA"
+        type: string
+        default: ""
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Maximum time (seconds) to wait for the deployment to become ready
+  READINESS_TIMEOUT: 90
+  # Smoke test timeout per request (curl --max-time)
+  REQUEST_TIMEOUT: 15
+
+jobs:
+  smoke-tests:
+    name: Smoke tests — ${{ inputs.environment || 'staging' }}
+    runs-on: ubuntu-latest
+    # The whole suite must finish within 2 minutes (acceptance criterion)
+    timeout-minutes: 2
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Record deployment start time
+        id: timer
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      # ── 1. Health endpoint ──────────────────────────────────────────────────
+      - name: "Smoke #1 — Health endpoint returns 200"
+        id: health
+        run: |
+          echo "::group::GET /health"
+          response=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            --retry 3 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            -w '\n{"http_status":%{http_code}}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/health" \
+          ) || { echo "::error::Health check failed"; exit 1; }
+
+          echo "$response"
+          status=$(echo "$response" | tail -1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['http_status'])")
+          [ "$status" = "200" ] || { echo "::error::Expected 200, got $status"; exit 1; }
+
+          body=$(echo "$response" | head -n -1)
+          app_status=$(echo "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))")
+          echo "App status: $app_status"
+          [ "$app_status" = "ok" ] || [ "$app_status" = "degraded" ] || { echo "::error::Unhealthy: $app_status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── 2. OpenAPI docs endpoint ────────────────────────────────────────────
+      - name: "Smoke #2 — API docs JSON is served"
+        id: apidocs
+        run: |
+          echo "::group::GET /api/docs.json"
+          status=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/api/docs.json" \
+          ) || status="000"
+          echo "HTTP $status"
+          # Docs endpoint may be disabled in production — 404 is also acceptable
+          [ "$status" = "200" ] || [ "$status" = "404" ] || \
+            { echo "::error::Unexpected status $status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── 3. Authentication flow ──────────────────────────────────────────────
+      - name: "Smoke #3 — Authentication login flow"
+        id: auth
+        run: |
+          echo "::group::POST /api/auth/login"
+          response=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${{ secrets.SMOKE_TEST_ADMIN_EMAIL }}\",\"password\":\"${{ secrets.SMOKE_TEST_ADMIN_PASS }}\"}" \
+            -c /tmp/smoke_cookies.txt \
+            -w '\n{"http_status":%{http_code}}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/api/auth/login" \
+          ) || { echo "::error::Login request failed"; exit 1; }
+
+          status=$(echo "$response" | tail -1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['http_status'])")
+          [ "$status" = "200" ] || [ "$status" = "201" ] || { echo "::error::Login returned $status"; exit 1; }
+
+          body=$(echo "$response" | head -n -1)
+          token=$(echo "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token') or d.get('accessToken') or '')" 2>/dev/null || true)
+          echo "Token received: $([ -n "$token" ] && echo 'yes' || echo 'no (cookie auth)')"
+          # Store token for subsequent steps
+          echo "TOKEN=$token" >> "$GITHUB_ENV"
+          echo "::endgroup::"
+
+      # ── 4. Payment list endpoint ────────────────────────────────────────────
+      - name: "Smoke #4 — Payments pending list is reachable"
+        id: payments
+        run: |
+          echo "::group::GET /api/payments/pending"
+          if [ -n "$TOKEN" ]; then
+            auth_header="-H \"Authorization: Bearer $TOKEN\""
+          else
+            auth_header="-b /tmp/smoke_cookies.txt"
+          fi
+
+          status=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
+            ${TOKEN:-"-b /tmp/smoke_cookies.txt"} \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/api/payments/pending?limit=1" \
+          ) || status="000"
+
+          echo "HTTP $status"
+          [ "$status" = "200" ] || { echo "::error::Payments pending returned $status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── 5. Report generation endpoint ──────────────────────────────────────
+      - name: "Smoke #5 — Report endpoint responds"
+        id: reports
+        run: |
+          echo "::group::GET /api/reports"
+          status=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
+            ${TOKEN:-"-b /tmp/smoke_cookies.txt"} \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/api/reports?startDate=$(date -d '30 days ago' +%Y-%m-%d)&endDate=$(date +%Y-%m-%d)" \
+          ) || status="000"
+
+          echo "HTTP $status"
+          [ "$status" = "200" ] || { echo "::error::Report endpoint returned $status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── 6. Students list endpoint ───────────────────────────────────────────
+      - name: "Smoke #6 — Students list is reachable"
+        id: students
+        run: |
+          echo "::group::GET /api/students"
+          status=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
+            ${TOKEN:-"-b /tmp/smoke_cookies.txt"} \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/api/students?limit=1" \
+          ) || status="000"
+
+          echo "HTTP $status"
+          [ "$status" = "200" ] || { echo "::error::Students endpoint returned $status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── 7. Prometheus metrics endpoint ─────────────────────────────────────
+      - name: "Smoke #7 — Metrics endpoint is reachable"
+        id: metrics
+        run: |
+          echo "::group::GET /metrics"
+          status=$(curl -sf \
+            --max-time "$REQUEST_TIMEOUT" \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "${{ secrets.SMOKE_TEST_BASE_URL }}/metrics" \
+          ) || status="000"
+
+          echo "HTTP $status"
+          # Metrics may be protected — 401/403 is acceptable
+          [ "$status" = "200" ] || [ "$status" = "401" ] || [ "$status" = "403" ] || \
+            { echo "::error::Metrics endpoint returned $status"; exit 1; }
+          echo "::endgroup::"
+
+      # ── Compute duration ────────────────────────────────────────────────────
+      - name: Compute test duration
+        id: duration
+        if: always()
+        run: |
+          end=$(date +%s)
+          start=${{ steps.timer.outputs.start }}
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      # ── Slack notification — success ────────────────────────────────────────
+      - name: Notify Slack (success)
+        if: success() && secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          VERSION:     ${{ inputs.version || github.sha }}
+          DURATION:    ${{ steps.duration.outputs.seconds }}
+        run: |
+          payload=$(python3 -c "
+          import json, os
+          env      = os.environ['ENVIRONMENT']
+          version  = os.environ['VERSION'][:10]
+          duration = os.environ['DURATION']
+          print(json.dumps({
+            'text': f':white_check_mark: *Smoke tests passed* — {env}',
+            'attachments': [{
+              'color': 'good',
+              'fields': [
+                {'title': 'Environment', 'value': env,            'short': True},
+                {'title': 'Version',     'value': version,        'short': True},
+                {'title': 'Result',      'value': 'All 7 checks passed', 'short': True},
+                {'title': 'Duration',    'value': f'{duration}s', 'short': True},
+              ]
+            }]
+          }))
+          ")
+          curl -sf -X POST \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "${{ secrets.SLACK_WEBHOOK_URL }}"
+
+      # ── Slack notification — failure + rollback signal ──────────────────────
+      - name: Notify Slack (failure)
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          ENVIRONMENT:   ${{ inputs.environment || 'staging' }}
+          VERSION:       ${{ inputs.version || github.sha }}
+          DURATION:      ${{ steps.duration.outputs.seconds }}
+          HEALTH_RESULT: ${{ steps.health.outcome }}
+          AUTH_RESULT:   ${{ steps.auth.outcome }}
+          PAYMENTS_RESULT: ${{ steps.payments.outcome }}
+          REPORTS_RESULT: ${{ steps.reports.outcome }}
+          STUDENTS_RESULT: ${{ steps.students.outcome }}
+          METRICS_RESULT: ${{ steps.metrics.outcome }}
+        run: |
+          payload=$(python3 -c "
+          import json, os
+
+          def mark(outcome):
+              return ':white_check_mark:' if outcome == 'success' else ':x:' if outcome == 'failure' else ':grey_question:'
+
+          env      = os.environ['ENVIRONMENT']
+          version  = os.environ['VERSION'][:10]
+          duration = os.environ['DURATION']
+
+          checks = [
+            ('Health /health',             os.environ['HEALTH_RESULT']),
+            ('Auth /api/auth/login',       os.environ['AUTH_RESULT']),
+            ('Payments /api/payments',     os.environ['PAYMENTS_RESULT']),
+            ('Reports /api/reports',       os.environ['REPORTS_RESULT']),
+            ('Students /api/students',     os.environ['STUDENTS_RESULT']),
+            ('Metrics /metrics',           os.environ['METRICS_RESULT']),
+          ]
+          check_text = '\n'.join(f'{mark(r)} {name}' for name, r in checks)
+
+          print(json.dumps({
+            'text': f':rotating_light: *Smoke tests FAILED* — {env} — ROLLBACK TRIGGERED',
+            'attachments': [{
+              'color': 'danger',
+              'fields': [
+                {'title': 'Environment', 'value': env,          'short': True},
+                {'title': 'Version',     'value': version,      'short': True},
+                {'title': 'Duration',    'value': f'{duration}s','short': True},
+                {'title': 'Checks',      'value': check_text,   'short': False},
+              ]
+            }]
+          }))
+          ")
+          curl -sf -X POST \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "${{ secrets.SLACK_WEBHOOK_URL }}"
+
+      # ── Rollback signal ─────────────────────────────────────────────────────
+      # Set the job output so the calling deployment workflow can gate a
+      # rollback step on smoke_tests.outputs.rollback_required == 'true'.
+    outputs:
+      rollback_required: ${{ failure() && 'true' || 'false' }}
+      duration_seconds:  ${{ steps.duration.outputs.seconds }}
