@@ -7,9 +7,11 @@ import {
 } from "./Icons";
 import PageHero, { StatCard } from "./PageHero";
 import { useTranslation } from "react-i18next";
+import { useReportExport } from "../hooks/useReportExport";
 
 export default function ReportDownload() {
   const { t } = useTranslation();
+  const { addJob, updateProgress, completeJob, failJob } = useReportExport();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate]     = useState("");
   const [className, setClassName] = useState("");
@@ -83,6 +85,19 @@ export default function ReportDownload() {
     if (studentId) params.studentId = studentId;
     if (paymentStatus) params.paymentStatus = paymentStatus;
 
+    // Build a human-readable label for the tray job
+    const label = startDate && endDate
+      ? `Report ${startDate} → ${endDate}`
+      : className
+      ? `Report — ${className}`
+      : "Report export";
+
+    const filename = startDate && endDate
+      ? `report-${startDate}_to_${endDate}.csv`
+      : "report-all-time.csv";
+
+    const jobId = addJob({ label });
+
     try {
       setCsvLoading(true);
       const url = getReportCsvUrl(params);
@@ -92,18 +107,19 @@ export default function ReportDownload() {
       if (!response.ok) throw new Error(t("reports.downloadError"));
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
-      const filename =
-        startDate && endDate
-          ? `report-${startDate}_to_${endDate}.csv`
-          : "report-all-time.csv";
+
+      // Notify the tray that the export is ready
+      completeJob({ id: jobId, blobUrl, filename });
+
+      // Also trigger the download immediately for users already on this page
       const a = document.createElement("a");
       a.href = blobUrl;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
     } catch (err) {
+      failJob({ id: jobId, error: err.message || t("reports.failedCsvUnknown") });
       setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
     } finally {
       setCsvLoading(false);

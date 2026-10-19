@@ -7,6 +7,9 @@ import Navbar from "../components/Navbar";
 import AppLayout from "../components/AppLayout";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { AdminAuthProvider } from "../hooks/AdminAuthContext";
+import { ReportExportProvider } from "../hooks/useReportExport";
+import { TableDensityProvider } from "../hooks/useTableDensity";
+import ReportExportTray from "../components/ReportExportTray";
 import i18n, { SUPPORTED_LOCALES } from "../i18n";
 
 export const ThemeContext = createContext({ dark: false, toggle: () => {} });
@@ -52,19 +55,25 @@ export default function MyApp({ Component, pageProps }) {
   return (
     <AdminAuthProvider>
       <ThemeContext.Provider value={{ dark, toggle: () => setDark((d) => !d) }}>
-        <Head>
-          <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        </Head>
-        <Navbar />
-        <ErrorBoundary>
-          {useAppLayout ? (
-            <AppLayout>
-              <Component {...pageProps} />
-            </AppLayout>
-          ) : (
-            <Component {...pageProps} />
-          )}
-        </ErrorBoundary>
+        <TableDensityProvider>
+          <ReportExportProvider>
+            <Head>
+              <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+            </Head>
+            <Navbar />
+            <ErrorBoundary>
+              {useAppLayout ? (
+                <AppLayout>
+                  <Component {...pageProps} />
+                </AppLayout>
+              ) : (
+                <Component {...pageProps} />
+              )}
+            </ErrorBoundary>
+            {/* Persistent report export tray — survives navigation */}
+            <ReportExportTray />
+          </ReportExportProvider>
+        </TableDensityProvider>
       </ThemeContext.Provider>
     </AdminAuthProvider>
   );
