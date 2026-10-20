@@ -411,6 +411,88 @@ jobs:
         if: always() && steps.changes.outputs.run == 'true'
         run: docker compose down -v
 
+  # ── Contract testing (Soroban) ─────────────────────────────────────────────
+  # Compiles the PaymentRegistry Soroban contract, starts a local Stellar
+  # standalone node via Docker (stellar/quickstart), deploys the contract,
+  # runs Rust unit tests + on-chain smoke tests, and uploads test results
+  # as a CI artifact. Caches Cargo registry + the compiled .wasm so
+  # subsequent runs skip recompilation. Gates PRs that touch contract code.
+  contract-tests:
+    name: Soroban contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install stellar CLI
+        run: |
+          cargo install --locked soroban-cli --version 22.0.0 || true
+          echo "$(find $HOME/.cargo/bin -name 'stellar' -type f -exec dirname {} \; | head -1)" >> "$GITHUB_PATH"
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/payment-registry/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/payment-registry/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Compile contract to Wasm
+        working-directory: contracts/payment-registry
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown
+
+      - name: Run Rust unit tests
+        working-directory: contracts/payment-registry
+        run: cargo test -- --nocapture
+
+      - name: Start local Stellar standalone node
+        run: |
+          docker run -d \
+            --name stellar-standalone \
+            -p 8000:8000 \
+            stellar/quickstart:testing \
+            standalone \
+            --enable-soroban-rpc
+          echo "Waiting for node to be ready..."
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000; then
+              echo "Stellar node is ready."
+              break
+            fi
+            echo "Waiting... ($i/40)"
+            sleep 3
+          done
+          if ! curl -sf http://localhost:8000; then
+            echo "Stellar node did not start in time"
+            docker logs stellar-standalone
+            exit 1
+          fi
+
+      - name: Deploy contract and run smoke tests
+        run: bash scripts/contract-tests.sh
+
+      - name: Upload contract test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-test-results
+          path: |
+            contracts/payment-registry/target/wasm32-unknown-unknown/release/*.wasm
+          retention-days: 14
+
+      - name: Stop Stellar node
+        if: always()
+        run: docker rm -f stellar-standalone || true
+
   # ── #1389: Required gate ─────────────────────────────────────────────────
   # A single job that every branch-protection rule needs to require. Add this
   # job name ("CI gate") as the sole required status check in GitHub's branch
@@ -435,5 +517,6 @@ jobs:
       - build-frontend
       - test
       - coverage
+      - contract-tests
     steps:
       - run: echo "All required checks passed."
