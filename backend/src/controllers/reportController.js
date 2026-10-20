@@ -90,7 +90,8 @@ async function getReport(req, res, next) {
 
     if (format === 'accounting_csv') {
       const dataVersion = await getDataVersion(req.schoolId);
-      const cacheKey = KEYS.report(req.schoolId, startDate, endDate, dataVersion);
+      const timezone = (await School.findOne({ schoolId: req.schoolId }).lean())?.timezone || 'UTC';
+      const cacheKey = KEYS.report(req.schoolId, startDate, endDate, dataVersion, timezone);
       let cached = get(cacheKey);
       if (cached !== undefined) {
         const csv = cached.csv;
@@ -108,7 +109,7 @@ async function getReport(req, res, next) {
         return res.send(csv);
       }
 
-      const { csv, schemaVersion } = await generateAccountingCsv({ schoolId: req.schoolId, startDate, endDate });
+      const { csv, schemaVersion } = await generateAccountingCsv({ schoolId: req.schoolId, startDate, endDate, timezone });
       set(cacheKey, { csv, schemaVersion }, TTL.REPORT);
 
       const s = startDate || null;
@@ -127,7 +128,7 @@ async function getReport(req, res, next) {
     const school = await School.findOne({ schoolId: req.schoolId }).lean();
     const timezone = school?.timezone || 'UTC';
     const dataVersion = await getDataVersion(req.schoolId);
-    const cacheKey = KEYS.report(req.schoolId, startDate, endDate, dataVersion);
+    const cacheKey = KEYS.report(req.schoolId, startDate, endDate, dataVersion, timezone);
     let report = get(cacheKey);
     if (report === undefined) {
       report = await generateReport({ schoolId: req.schoolId, startDate, endDate, timezone });

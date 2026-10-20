@@ -11,6 +11,7 @@ import PageHero, { StatCard } from "./PageHero";
 import { StandaloneEmptyState } from "./EmptyState";
 import { useTranslation } from "react-i18next";
 import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
+import { isRetryable } from "../utils/retryClassification";
 
 export default function ReportDownload() {
   const { t } = useTranslation();
@@ -21,6 +22,8 @@ export default function ReportDownload() {
   const [paymentStatus, setPaymentStatus] = useState("");
   const [report, setReport]       = useState(null);
   const [error, setError]         = useState("");
+  const [errorRetryable, setErrorRetryable] = useState(false);
+  const [errorOperation, setErrorOperation] = useState(null);
   const [loading, setLoading]     = useState(false);
   const [csvLoading, setCsvLoading] = useState(false);
   const [reportHistory, setReportHistory] = useState([]);
@@ -57,8 +60,10 @@ export default function ReportDownload() {
   }
 
   async function handleGenerate(e) {
-    e.preventDefault();
+    e?.preventDefault();
     setError(""); setReport(null); setLoading(true);
+    setErrorRetryable(false);
+    setErrorOperation(null);
     try {
       const params = {};
       if (startDate) params.startDate = startDate;
@@ -70,6 +75,8 @@ export default function ReportDownload() {
       setReport(data);
       saveReportToHistory(data, params);
     } catch (err) {
+      setErrorRetryable(isRetryable(err));
+      setErrorOperation("report");
       setError(
         getErrorMessage(err.response?.data?.code, err.response?.data?.error) ||
         t("reports.failedGenerate")
@@ -89,6 +96,8 @@ export default function ReportDownload() {
 
     // Clear any previous error before starting a new download.
     setError("");
+    setErrorRetryable(false);
+    setErrorOperation(null);
 
     try {
       setCsvLoading(true);
@@ -97,7 +106,11 @@ export default function ReportDownload() {
         credentials: "include",
         headers: { format: "csv" },
       });
-      if (!response.ok) throw new Error(t("reports.downloadError"));
+      if (!response.ok) {
+        throw Object.assign(new Error(t("reports.downloadError")), {
+          response: { status: response.status },
+        });
+      }
       const blob = await response.blob();
 
       // Prefer the server-supplied filename from Content-Disposition; fall
@@ -121,6 +134,8 @@ export default function ReportDownload() {
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
       // Surface an actionable message and ensure no stale loading state remains.
+      setErrorRetryable(isRetryable(err));
+      setErrorOperation("csv");
       setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
     } finally {
       setCsvLoading(false);
@@ -235,7 +250,10 @@ export default function ReportDownload() {
             variant="error"
             title={t("reports.failedGenerate")}
             description={error}
-            action={{ label: t("actions.retry"), onClick: (e) => handleGenerate(e) }}
+            action={errorRetryable ? {
+              label: t("actions.retry"),
+              onClick: () => errorOperation === "csv" ? handleCsv() : handleGenerate(),
+            } : undefined}
           />
         </div>
       )}

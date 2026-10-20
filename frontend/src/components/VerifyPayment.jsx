@@ -4,7 +4,7 @@ import { verifyPayment } from "../services/api";
 import { parseStellarError } from "../utils/stellarErrors";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
-import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
+import TimestampDisplay from "./TimestampDisplay";
 import PaymentFailureBanner from "./PaymentFailureBanner";
 
 const FEE_VALIDATION_SEVERITY = {
@@ -163,7 +163,7 @@ export default function VerifyPayment() {
             <InfoRow label={t("verifyPayment.memoLabel")} mono>{result.memo}</InfoRow>
             <InfoRow label={t("verifyPayment.date")}>
               {result.date
-                ? <TimestampDisplay iso={result.date} mode={DISPLAY_MODE.UTC} />
+                ? <TimestampDisplay iso={result.date} />
                 : "—"}
             </InfoRow>
             {result.feeValidation?.message && st !== "valid" && (

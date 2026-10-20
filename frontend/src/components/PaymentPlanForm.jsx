@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { createPaymentPlan, getPaymentPlan, cancelPaymentPlan } from "../services/api";
 import { IconAlertTriangle, IconCheck, IconX } from "./Icons";
-import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
+import TimestampDisplay from "./TimestampDisplay";
 
 export default function PaymentPlanForm({ student, onClose, onSave }) {
   const { t } = useTranslation();
@@ -271,7 +271,7 @@ export default function PaymentPlanForm({ student, onClose, onSave }) {
                       <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{t("paymentPlan.dueDate")}</div>
                       <div style={{ fontWeight: 600 }}>
                         {inst.dueDate
-                          ? <TimestampDisplay iso={inst.dueDate} mode={DISPLAY_MODE.UTC} dateOnly />
+                          ? <TimestampDisplay iso={inst.dueDate} dateOnly />
                           : "—"}
                       </div>
                     </div>

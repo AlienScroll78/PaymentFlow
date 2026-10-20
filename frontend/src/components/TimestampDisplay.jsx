@@ -33,13 +33,14 @@
  */
 
 import { DISPLAY_MODE, formatTimestamp, formatDateOnly } from '../utils/dateTime';
+import { useAdminAuthContext } from '../hooks/AdminAuthContext';
 
 export { DISPLAY_MODE };
 
 /**
  * @param {object}  props
  * @param {string}  [props.iso]                  - ISO 8601 timestamp string
- * @param {string}  [props.mode=DISPLAY_MODE.LOCALE]
+ * @param {string}  [props.mode=DISPLAY_MODE.LOCAL]
  * @param {string}  [props.locale]               - BCP 47 locale override
  * @param {string}  [props.timeZone]             - IANA timezone override
  * @param {string}  [props.fallback='—']         - Content when iso is null/invalid
@@ -51,7 +52,7 @@ export { DISPLAY_MODE };
  */
 export default function TimestampDisplay({
   iso,
-  mode = DISPLAY_MODE.LOCALE,
+  mode = DISPLAY_MODE.LOCAL,
   locale,
   timeZone,
   fallback = '—',
@@ -61,8 +62,14 @@ export default function TimestampDisplay({
   style,
   labelClassName,
 }) {
+  const { timeZone: schoolTimeZone } = useAdminAuthContext();
   const fn = dateOnly ? formatDateOnly : formatTimestamp;
-  const { formatted, label, iso: isoOut } = fn(iso, { mode, locale, timeZone, fallback });
+  const { formatted, label, iso: isoOut } = fn(iso, {
+    mode,
+    locale,
+    timeZone: timeZone || schoolTimeZone || 'UTC',
+    fallback,
+  });
 
   // When the value is the fallback (null/invalid input) just render a plain span.
   if (!isoOut) {

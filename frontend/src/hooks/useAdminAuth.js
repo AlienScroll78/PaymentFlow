@@ -49,6 +49,7 @@ export function useAdminAuth() {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [schoolId, setSchoolId] = useState(null);
+  const [timeZone, setTimeZone] = useState('UTC');
   const [userId, setUserId] = useState(null);
   const [checked, setChecked] = useState(false);
   // #1218 — surfaces a recoverable auth-me failure so consuming pages can
@@ -70,6 +71,7 @@ export function useAdminAuth() {
     if (!mountedRef.current) return;
     setIsAdmin(true);
     setSchoolId(data.schoolId || null);
+    setTimeZone(data.timezone || 'UTC');
     setUserId(data.userId || null);
     setAuthMeError(false);
     if (typeof window !== 'undefined') {
@@ -89,6 +91,7 @@ export function useAdminAuth() {
         if (!mountedRef.current) return;
         setIsAdmin(false);
         setSchoolId(null);
+        setTimeZone('UTC');
         setUserId(null);
       })
       .finally(() => {
@@ -111,6 +114,7 @@ export function useAdminAuth() {
         // /auth/me context could not be loaded so the UI can offer a retry.
         setIsAdmin(true);
         setSchoolId(null);
+        setTimeZone('UTC');
         setUserId(null);
         setAuthMeError(true);
       });
@@ -140,6 +144,7 @@ export function useAdminAuth() {
     }).catch(() => console.debug('[useAdminAuth] logout request failed'));
     setIsAdmin(false);
     setSchoolId(null);
+    setTimeZone('UTC');
     setUserId(null);
     setAuthMeError(false);
     // Clear school context from storage
@@ -150,5 +155,5 @@ export function useAdminAuth() {
     router.push('/login');
   }, [router]);
 
-  return { isAdmin, checked, login, logout, schoolId, userId, authMeError, retryAuth };
+  return { isAdmin, checked, login, logout, schoolId, timeZone, userId, authMeError, retryAuth };
 }

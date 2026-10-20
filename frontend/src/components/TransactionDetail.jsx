@@ -38,6 +38,7 @@ import {
   IconChevronLeft,
 } from "./Icons";
 import PaymentStatusTimeline from "./PaymentStatusTimeline";
+import TimestampDisplay from "./TimestampDisplay";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,14 +46,6 @@ const STELLAR_EXPLORER_BASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet"
     ? "https://stellar.expert/explorer/public/tx/"
     : "https://stellar.expert/explorer/testnet/tx/";
-
-function formatDate(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
 
 function truncateHash(hash, len = 16) {
   if (!hash) return "—";
@@ -475,7 +468,7 @@ export default function TransactionDetail({ transaction, onClose, onDisputeRaise
             <div className="txd-summary-item">
               <span className="txd-summary-label">{t("transactionDetail.date")}</span>
               <span className="txd-summary-value" style={{ fontSize: "0.875rem", fontWeight: 600 }}>
-                {formatDate(tx.createdAt)}
+                <TimestampDisplay iso={tx.createdAt} />
               </span>
             </div>
 

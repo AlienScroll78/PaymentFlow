@@ -10,9 +10,11 @@ import { useTranslation } from "react-i18next";
 import { syncPayments } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
 import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
+import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 
 export default function SyncButton({ onSyncComplete, lastSyncTime }) {
   const { t } = useTranslation();
+  const { timeZone } = useAdminAuthContext();
   const [showModal, setShowModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
@@ -33,7 +35,7 @@ export default function SyncButton({ onSyncComplete, lastSyncTime }) {
 
   const formattedLastSync = (() => {
     if (!lastSyncTime) return t("actions.never");
-    const { formatted, label } = formatTimestamp(lastSyncTime, { mode: DISPLAY_MODE.LOCAL });
+    const { formatted, label } = formatTimestamp(lastSyncTime, { mode: DISPLAY_MODE.LOCAL, timeZone });
     return label ? `${formatted} ${label}` : formatted;
   })();
 

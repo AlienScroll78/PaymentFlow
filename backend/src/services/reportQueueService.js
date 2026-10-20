@@ -23,7 +23,7 @@ async function processReportJob(job) {
 
   try {
     if (type === 'accounting_csv') {
-      const { csv, schemaVersion: sv } = await generateAccountingCsv({ schoolId, startDate, endDate });
+      const { csv, schemaVersion: sv } = await generateAccountingCsv({ schoolId, startDate, endDate, timezone });
       await setJobCompleted(jobId, { csv, schemaVersion: sv });
       return { success: true, jobId, type };
     }

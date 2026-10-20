@@ -53,9 +53,56 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { getPaymentSummary, getStudents } from '../services/api';
+import { getPaymentSummary, getStudents, getSyncStatus } from '../services/api';
 
 const PAGE_SIZE = 20;
+const DASHBOARD_CACHE_TTL_MS = 15000;
+const dashboardRequests = new Map();
+
+function cachedDashboardRequest(key, request) {
+  const cached = dashboardRequests.get(key);
+  if (cached && (!cached.expiresAt || cached.expiresAt > Date.now())) {
+    return cached.promise;
+  }
+
+  const entry = { expiresAt: 0, promise: null };
+  entry.promise = request()
+    .then((result) => {
+      entry.expiresAt = Date.now() + DASHBOARD_CACHE_TTL_MS;
+      return result;
+    })
+    .catch((error) => {
+      if (dashboardRequests.get(key) === entry) dashboardRequests.delete(key);
+      throw error;
+    });
+  dashboardRequests.set(key, entry);
+  return entry.promise;
+}
+
+export function loadDashboardSummary(options) {
+  return cachedDashboardRequest('summary', () => getPaymentSummary(options));
+}
+
+export function loadDashboardStudents(page, pageSize, filters, options) {
+  const key = `students:${JSON.stringify([page, pageSize, filters])}`;
+  return cachedDashboardRequest(key, () => getStudents(page, pageSize, filters, options));
+}
+
+export function loadDashboardSyncStatus(options) {
+  return cachedDashboardRequest('sync-status', () => getSyncStatus(options));
+}
+
+export function prefetchDashboardData() {
+  return Promise.allSettled([
+    loadDashboardSummary(),
+    loadDashboardStudents(1, PAGE_SIZE, { search: '', status: 'all', className: '' }),
+    loadDashboardSyncStatus(),
+  ]);
+}
+
+export function invalidateDashboardData() {
+  dashboardRequests.clear();
+}
 
 /**
  * @typedef {Object} DashboardLoaderResult
@@ -111,7 +158,7 @@ export function useDashboardLoader({
   const loadSummary = useCallback(() => {
     setSummaryLoading(true);
     setSummaryError(null);
-    return getPaymentSummary()
+    return loadDashboardSummary()
       .then(({ data }) => {
         setSummary(data);
         return data;
@@ -133,7 +180,7 @@ export function useDashboardLoader({
 
     setStudentsLoading(true);
     setStudentsError(null);
-    return getStudents(
+    return loadDashboardStudents(
       page,
       PAGE_SIZE,
       { search, status: statusFilter, className: classFilter },

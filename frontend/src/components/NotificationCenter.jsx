@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
+import { useAdminAuthContext } from '../hooks/AdminAuthContext';
+import { DISPLAY_MODE, formatTimestamp } from '../utils/dateTime';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -31,7 +33,7 @@ function BellIcon({ hasUnread }) {
   );
 }
 
-function TimeAgo({ date }) {
+function TimeAgo({ date, timeZone }) {
   const d = new Date(date);
   const now = Date.now();
   const diff = Math.floor((now - d.getTime()) / 1000);
@@ -40,12 +42,14 @@ function TimeAgo({ date }) {
   if (diff < 60)        label = 'Just now';
   else if (diff < 3600) label = `${Math.floor(diff / 60)}m ago`;
   else if (diff < 86400) label = `${Math.floor(diff / 3600)}h ago`;
-  else                  label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  else label = new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric' }).format(d);
+
+  const formatted = formatTimestamp(d.toISOString(), { mode: DISPLAY_MODE.LOCAL, timeZone });
 
   return (
     <time
       dateTime={d.toISOString()}
-      title={d.toLocaleString()}
+      title={`${formatted.formatted} ${formatted.label}`}
       style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', flexShrink: 0 }}
     >
       {label}
@@ -69,6 +73,7 @@ function TimeAgo({ date }) {
  */
 export default function NotificationCenter() {
   const router = useRouter();
+  const { timeZone } = useAdminAuthContext();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -527,7 +532,7 @@ export default function NotificationCenter() {
                         >
                           {sev.label}
                         </span>
-                        <TimeAgo date={notif.createdAt} />
+                        <TimeAgo date={notif.createdAt} timeZone={timeZone} />
                       </div>
                     </div>
                   </div>

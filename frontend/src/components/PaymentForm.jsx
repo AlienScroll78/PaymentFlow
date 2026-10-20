@@ -10,7 +10,7 @@ import { useSessionGuard } from "../hooks/useSessionGuard";
 import PaymentConfirmationStep from "./PaymentConfirmationStep";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconCopy, IconCheck, IconAlertTriangle, IconSearch, IconDownload } from "./Icons";
-import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
+import TimestampDisplay from "./TimestampDisplay";
 
 const STATUS_BADGE = {
   valid:     { cls: "badge badge-success", key: "status.validation.valid" },
@@ -627,7 +627,7 @@ export default function PaymentForm({ initialStudentId = "", isOnline = true, wa
                     </div>
                     {p.confirmedAt && (
                       <div style={{ fontSize: "0.75rem", color: "var(--text-subtle)" }}>
-                        <TimestampDisplay iso={p.confirmedAt} mode={DISPLAY_MODE.UTC} />
+                        <TimestampDisplay iso={p.confirmedAt} />
                       </div>
                     )}
 

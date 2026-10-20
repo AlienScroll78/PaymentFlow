@@ -23,6 +23,7 @@
  */
 import React from 'react';
 import { PAYMENT_STATUS, PAYMENT_STATUS_LABELS, isTerminalStatus } from '../utils/paymentStatus';
+import TimestampDisplay from './TimestampDisplay';
 
 const STATUS_STYLE = {
   [PAYMENT_STATUS.PENDING]:   { color: 'var(--warning)',    icon: '⏳', badgeClass: 'badge-warning'  },
@@ -113,9 +114,9 @@ export function StatusTimeline({ payments, compact }) {
             <span className="payment-status-timeline__content">
               <span className="payment-status-timeline__label">{label}</span>
               {isoDate && (
-                <time className="payment-status-timeline__time" dateTime={isoDate}>
-                  {new Date(isoDate).toLocaleString()}
-                </time>
+                <span className="payment-status-timeline__time">
+                  <TimestampDisplay iso={isoDate} />
+                </span>
               )}
             </span>
           </li>

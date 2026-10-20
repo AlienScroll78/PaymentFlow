@@ -37,6 +37,7 @@ import { FixedSizeList } from "react-window";
 import { useTranslation } from "react-i18next";
 import DisputeForm from "./DisputeForm";
 import { IconAlertTriangle } from "./Icons";
+import TimestampDisplay from "./TimestampDisplay";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ function TransactionRow({ index, style, data }) {
         {/* Date */}
         {p.confirmedAt && (
           <div style={{ fontSize: "0.72rem", color: "var(--text-subtle)" }}>
-            {new Date(p.confirmedAt).toLocaleString()}
+            <TimestampDisplay iso={p.confirmedAt} />
           </div>
         )}
 

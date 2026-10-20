@@ -200,7 +200,10 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/superadmin', superAdminRoutes);
-app.use('/api/csp-report', cspReportRoutes);
+app.use('/api/csp-report', express.json({
+  type: ['application/csp-report', 'application/json'],
+  limit: config.MAX_BODY_SIZE,
+}), cspReportRoutes);
 app.get('/api/consistency', requireAdminAuth, runConsistencyCheck);
 app.get('/health', healthCheck);
 app.get('/health/live', healthLive);

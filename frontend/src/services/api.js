@@ -1,6 +1,7 @@
 import axios from "axios";
 import { createRefreshHandler } from "./authRefresh";
 import { getEnvVar } from '../config/envValidation';
+import { isRetryable } from '../utils/retryClassification';
 
 const TIMEOUT_MS = parseInt(getEnvVar('NEXT_PUBLIC_REQUEST_TIMEOUT_MS', '15000'), 10);
 
@@ -69,6 +70,26 @@ const onResponseRejected = createRefreshHandler({
 });
 
 api.interceptors.response.use((response) => response, onResponseRejected);
+
+api.interceptors.response.use(undefined, async (error) => {
+  const config = error.config;
+  if (
+    !config ||
+    config.method?.toLowerCase() !== 'get' ||
+    config.signal?.aborted ||
+    !isRetryable(error)
+  ) {
+    throw error;
+  }
+
+  const attempts = config.__readAttempts || 1;
+  if (attempts >= 3) throw error;
+
+  config.__readAttempts = attempts + 1;
+  await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** (attempts - 1))));
+  if (config.signal?.aborted) throw error;
+  return api.request(config);
+});
 
 // Export the bare axios instance as the default so callers that need ad-hoc
 // requests (e.g. login.jsx) can use api.post('/auth/login', data) without

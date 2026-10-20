@@ -6,6 +6,7 @@ const logger = require('../utils/logger');
 const { getRedisClient, isRedisReady } = require('../config/redisClient');
 const { get, set, del } = require('../cache');
 const { sendAdminAlert } = require('../services/alertService');
+const School = require('../models/schoolModel');
 
 // ── Constant-time string comparison ───────────────────────────────────────────
 
@@ -695,11 +696,21 @@ async function handleLogout(req, res) {
 
 // ── Me ────────────────────────────────────────────────────────────────────────
 
-function handleMe(req, res) {
+async function handleMe(req, res) {
   const p = req.admin;
+  let timezone = 'UTC';
+  if (p.schoolId) {
+    try {
+      const school = await School.findOne({ schoolId: p.schoolId }).select('timezone').lean();
+      timezone = school?.timezone || 'UTC';
+    } catch (err) {
+      logger.warn('[AuthController] Failed to resolve school timezone', { error: err.message });
+    }
+  }
   return res.json({
     userId:   p.userId   || p.sub || null,
     schoolId: p.schoolId || null,
+    timezone,
     roles:    Array.isArray(p.roles) ? p.roles : (p.role ? [p.role] : []),
     exp:      p.exp      || null,
   });

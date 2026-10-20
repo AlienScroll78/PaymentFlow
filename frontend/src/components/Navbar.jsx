@@ -6,6 +6,7 @@ import TestnetBanner from "./TestnetBanner";
 import NotificationCenter from "./NotificationCenter";
 import { useTheme } from "../pages/_app";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import { prefetchDashboardData } from "../hooks/useDashboardLoader";
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from "../i18n";
 
 const PUBLIC_LINKS = [
@@ -440,6 +441,8 @@ export default function Navbar() {
                 role="listitem"
                 className={`nav-link${pathname === href ? " active" : ""}`}
                 aria-current={pathname === href ? "page" : undefined}
+                onMouseEnter={href === "/dashboard" ? prefetchDashboardData : undefined}
+                onFocus={href === "/dashboard" ? prefetchDashboardData : undefined}
               >
                 {t(i18nKey)}
               </Link>
@@ -527,6 +530,8 @@ export default function Navbar() {
               className={`nav-mobile-link${pathname === href ? " active" : ""}`}
               aria-current={pathname === href ? "page" : undefined}
               onClick={closeMenu}
+              onMouseEnter={href === "/dashboard" ? prefetchDashboardData : undefined}
+              onFocus={href === "/dashboard" ? prefetchDashboardData : undefined}
             >
               {t(i18nKey)}
             </Link>

@@ -14,13 +14,20 @@ import FilterChips from "../components/FilterChips"; // Issue #107
 import Pagination from "../components/Pagination";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { useRouteChangeAbort } from "../hooks/useRouteChangeAbort";
-import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
+import { getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
   IconSearch, IconChevronLeft, IconChevronRight,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 import { formatRelative } from "../utils/dateTime";
+import { isRetryable } from "../utils/retryClassification";
+import {
+  invalidateDashboardData,
+  loadDashboardStudents,
+  loadDashboardSummary,
+  loadDashboardSyncStatus,
+} from "../hooks/useDashboardLoader";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -39,9 +46,11 @@ function Dashboard() {
   const [summary, setSummary]                 = useState(null);
   const [summaryLoading, setSummaryLoading]   = useState(true);
   const [summaryError, setSummaryError]       = useState(null);
+  const [summaryRetryable, setSummaryRetryable] = useState(false);
   const [students, setStudents]               = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(true);
   const [studentsError, setStudentsError]     = useState(null);
+  const [studentsRetryable, setStudentsRetryable] = useState(false);
   const [page, setPage]                       = useState(1);
   const [pages, setPages]                     = useState(1);
   const [total, setTotal]                     = useState(0);
@@ -64,6 +73,7 @@ function Dashboard() {
     onEvent: (type) => {
       // Refresh summary/students whenever a payment or dispute event arrives.
       if (type === 'payment' || type.startsWith('dispute')) {
+        invalidateDashboardData();
         fetchSummary();
         fetchStudents(page, debouncedSearch, statusFilter, classFilter);
       }
@@ -89,14 +99,16 @@ function Dashboard() {
   const fetchSummary = useCallback(() => {
     setSummaryLoading(true);
     setSummaryError(null);
+    setSummaryRetryable(false);
     // Pass the route-change signal so navigation cancels the in-flight request
     // without triggering an error toast (Issue #6).
-    getPaymentSummary({ signal: routeSignal })
+    loadDashboardSummary({ signal: routeSignal })
       .then(({ data }) => setSummary(data))
       .catch((err) => {
         // Silently ignore requests cancelled by route change or AbortController.
         if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
         setSummaryError(t("dashboard.failedToLoadSummary"));
+        setSummaryRetryable(isRetryable(err));
       })
       .finally(() => setSummaryLoading(false));
   }, [t, routeSignal]);
@@ -109,7 +121,8 @@ function Dashboard() {
 
     setStudentsLoading(true);
     setStudentsError(null);
-    getStudents(p, pageSize, { search: srch, status: st, className: cls }, { signal: controller.signal })
+    setStudentsRetryable(false);
+    loadDashboardStudents(p, pageSize, { search: srch, status: st, className: cls }, { signal: controller.signal })
       .then(({ data }) => {
         setStudents(data.students);
         setPages(data.pages || 1);
@@ -119,6 +132,7 @@ function Dashboard() {
         // Silently ignore aborted (superseded) requests.
         if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
         setStudentsError(t("dashboard.failedToLoadStudents"));
+        setStudentsRetryable(isRetryable(err));
       })
       .finally(() => {
         // Only clear loading when this controller is still the current one.
@@ -137,7 +151,7 @@ function Dashboard() {
   useEffect(() => {
     // Pass routeSignal so navigation cancels these page-level requests without
     // triggering error toasts (Issue #6).
-    getSyncStatus({ signal: routeSignal })
+    loadDashboardSyncStatus({ signal: routeSignal })
       .then(({ data }) => setLastSyncAt(data.lastSyncAt))
       .catch((err) => {
         if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
@@ -168,6 +182,7 @@ function Dashboard() {
   }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSyncComplete(data) {
+    invalidateDashboardData();
     setLastSyncAt(new Date().toISOString());
     setSyncMsg(data?.message || t("dashboard.syncComplete"));
     setTimeout(() => setSyncMsg(null), 3500);
@@ -192,6 +207,7 @@ function Dashboard() {
   }
 
   function handleSaveStudent() {
+    invalidateDashboardData();
     handleCloseForm();
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
   }
@@ -397,7 +413,7 @@ function Dashboard() {
           {summaryError ? (
             <div role="alert" className="alert alert-danger" style={{ marginBottom: "1.5rem" }}>
               <span style={{ flex: 1 }}>{summaryError}</span>
-              <button onClick={fetchSummary} className="btn btn-sm btn-ghost" style={{ color: "inherit", borderColor: "currentColor", opacity: 0.8 }}>{t("actions.retry")}</button>
+              {summaryRetryable && <button onClick={fetchSummary} className="btn btn-sm btn-ghost" style={{ color: "inherit", borderColor: "currentColor", opacity: 0.8 }}>{t("actions.retry")}</button>}
             </div>
           ) : (
             <div className="stat-grid" style={{ marginBottom: "1.75rem" }}>
@@ -534,8 +550,8 @@ function Dashboard() {
                 <StandaloneEmptyState
                     variant="error"
                   title={t("dashboard.failedToLoadStudents")}
-                  description="Check your connection and try again."
-                  action={{ label: t("actions.retry"), onClick: () => fetchStudents(page, debouncedSearch, statusFilter, classFilter) }}
+                    description={studentsRetryable ? "Check your connection and try again." : studentsError}
+                  action={studentsRetryable ? { label: t("actions.retry"), onClick: () => fetchStudents(page, debouncedSearch, statusFilter, classFilter) } : undefined}
                 />
               </div>
             ) : (
