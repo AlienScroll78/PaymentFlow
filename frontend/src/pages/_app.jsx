@@ -4,6 +4,7 @@ import Head from "next/head";
 import "../styles/globals.css";
 import "../styles/redesign.css";
 import Navbar from "../components/Navbar";
+import BottomNav from "../components/BottomNav";
 import AppLayout from "../components/AppLayout";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { AdminAuthProvider } from "../hooks/AdminAuthContext";
@@ -65,6 +66,7 @@ export default function MyApp({ Component, pageProps }) {
             <Component {...pageProps} />
           )}
         </ErrorBoundary>
+        <BottomNav />
       </ThemeContext.Provider>
     </AdminAuthProvider>
   );

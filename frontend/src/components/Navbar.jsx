@@ -115,7 +115,8 @@ export default function Navbar() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 32px; height: 32px;
+          /* 44×44 pt minimum touch target */
+          width: 44px; height: 44px;
           background: rgba(255, 255, 255, 0.06);
           border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
@@ -177,7 +178,8 @@ export default function Navbar() {
           display: none;
           align-items: center;
           justify-content: center;
-          width: 32px; height: 32px;
+          /* 44×44 pt minimum touch target — Apple HIG / Material */
+          width: 44px; height: 44px;
           background: rgba(255, 255, 255, 0.06);
           border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 7px;
@@ -199,6 +201,13 @@ export default function Navbar() {
           height: 1px;
           background: rgba(255,255,255,0.07);
           margin: 0.5rem 0;
+        }
+        /* Mobile nav links need ≥44pt touch targets */
+        .nav-mobile .nav-link {
+          min-height: 44px;
+          display: flex;
+          align-items: center;
+          padding: 0.625rem 0.75rem;
         }
         @media (max-width: 720px) {
           .nav-links { display: none; }
