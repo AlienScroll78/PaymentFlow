@@ -1,9 +1,62 @@
+/**
+ * VerifyPayment — updated for Issue #352
+ * Uses PaymentAlert for structured severity on payment failure messages.
+ */
 import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { verifyPayment } from "../services/api";
 import { parseStellarError } from "../utils/stellarErrors";
 import { getErrorMessage } from "../utils/errorMessages";
-import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
+import { IconCheck, IconExternalLink, IconShield } from "./Icons";
+import PaymentAlert, { getSeverityForCode } from "./PaymentAlert";
+
+/* Suggested "what to do next" steps keyed by error code */
+const RECOVERY_STEPS = {
+  STELLAR_NETWORK_ERROR: [
+    "Wait a few minutes for the Stellar network to recover.",
+    "Check the Stellar network status page.",
+    "Use the retry button below.",
+  ],
+  HORIZON_UNREACHABLE: [
+    "Check your internet connection.",
+    "Wait a few minutes, then retry.",
+  ],
+  HORIZON_UNAVAILABLE: [
+    "The Stellar network is temporarily down.",
+    "Wait a few minutes, then retry.",
+  ],
+  tx_insufficient_fee: [
+    "The network is congested — wait a few minutes.",
+    "Retry with a higher transaction fee in your wallet.",
+  ],
+  op_underfunded: [
+    "Add more XLM to your wallet to cover the payment and the transaction fee.",
+    "Then retry the payment.",
+  ],
+  TX_FAILED: [
+    "Review the transaction on Stellar Explorer.",
+    "If the failure was temporary, retry verification.",
+    "Contact support if the issue persists.",
+  ],
+  MISSING_MEMO: [
+    "Ask the sender to resend with your Student ID in the memo field.",
+    "Your Student ID is required for automatic matching.",
+  ],
+  UNDERPAID: [
+    "Send the remaining balance to complete the fee.",
+    "Use your Student ID as the memo.",
+  ],
+  INVALID_DESTINATION: [
+    "Ensure the payment was sent to the school's wallet address.",
+    "Contact the school if unsure of the correct address.",
+  ],
+};
+
+const CRITICAL_STEPS = [
+  "Do not retry — this requires manual intervention.",
+  "Note the reference number shown below.",
+  "Contact support with the reference number for assistance.",
+];
 
 const STATUS_BADGE = {
   valid:     { cls: "badge badge-success", key: "status.validation.valid" },
@@ -40,37 +93,60 @@ export default function VerifyPayment() {
   const { t } = useTranslation();
   const [txHash, setTxHash]               = useState("");
   const [result, setResult]               = useState(null);
-  const [error, setError]                 = useState("");
-  const [stellarStatusUrl, setStellarStatusUrl] = useState(null);
+  const [error, setError]                 = useState(null); // { message, code, stellarStatusUrl }
   const [loading, setLoading]             = useState(false);
-  const errorRef = useRef(null);
+  const alertRef = useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError(""); setResult(null); setStellarStatusUrl(null); setLoading(true);
+    setError(null);
+    setResult(null);
+    setLoading(true);
     try {
       const res = await verifyPayment(txHash.trim());
       setResult(res.data);
     } catch (err) {
       const stellar = parseStellarError(err);
       if (stellar) {
-        setError(stellar.message);
-        setStellarStatusUrl(stellar.stellarStatusUrl);
+        const code = err.response?.data?.code || "STELLAR_NETWORK_ERROR";
+        setError({
+          message: stellar.message,
+          code,
+          stellarStatusUrl: stellar.stellarStatusUrl,
+        });
       } else {
-        setError(
-          getErrorMessage(err.response?.data?.code, err.response?.data?.error) ||
-          t("verifyPayment.verificationFailed")
-        );
-        setStellarStatusUrl(null);
+        const code = err.response?.data?.code;
+        setError({
+          message: getErrorMessage(code, err.response?.data?.error) || t("verifyPayment.verificationFailed"),
+          code,
+          stellarStatusUrl: null,
+        });
       }
-      errorRef.current?.focus();
+      setTimeout(() => alertRef.current?.focus(), 50);
     } finally {
       setLoading(false);
     }
   }
 
+  function handleRetry() {
+    handleSubmit({ preventDefault: () => {} });
+  }
+
   const st = result?.feeValidation?.status || "unknown";
   const badge = STATUS_BADGE[st] || STATUS_BADGE.unknown;
+
+  /* Resolve severity and steps for the current error */
+  const errorSeverity = error ? getSeverityForCode(error.code) : null;
+  const errorSteps = error
+    ? (errorSeverity === "critical"
+        ? CRITICAL_STEPS
+        : RECOVERY_STEPS[error.code] || null)
+    : null;
+
+  /* Append a Stellar status link as an extra step if available */
+  const stepsWithLink = error?.stellarStatusUrl && errorSteps
+    ? [...errorSteps, `Check Stellar network status: ${error.stellarStatusUrl}`]
+    : errorSteps;
 
   return (
     <div className="card">
@@ -108,22 +184,28 @@ export default function VerifyPayment() {
           </button>
         </form>
 
+        {/* Structured severity alert — replaces generic red banner */}
         {error && (
-          <div ref={errorRef} role="alert" tabIndex="-1" className="alert alert-danger" style={{ marginTop: "1rem" }}>
-            <IconAlertTriangle size={15} />
-            <div>
-              <span>{error}</span>
-              {stellarStatusUrl && (
-                <a
-                  href={stellarStatusUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "block", marginTop: "0.375rem", color: "inherit", fontWeight: 600, textDecoration: "underline" }}
-                >
-                  {t("verifyPayment.checkNetworkStatus")}
-                </a>
-              )}
-            </div>
+          <div ref={alertRef} tabIndex="-1" style={{ marginTop: "1rem", outline: "none" }}>
+            <PaymentAlert
+              severity={errorSeverity}
+              title={error.message}
+              steps={stepsWithLink}
+              onRetry={
+                errorSeverity === "error" ? handleRetry : undefined
+              }
+              correlationId={
+                errorSeverity === "critical"
+                  ? (error.code || "UNKNOWN")
+                  : undefined
+              }
+              supportLink={
+                errorSeverity === "critical"
+                  ? "mailto:support@stellaredupay.example"
+                  : undefined
+              }
+              onDismiss={() => setError(null)}
+            />
           </div>
         )}
 
