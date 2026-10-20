@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Response envelope versioning & compatibility testing (#298)**: Canonicalized `{ data, meta, error }` response envelopes, added `X-API-Version` response header across all endpoints, and established envelope shape test coverage in `tests/responseEnvelopeCompatibility.test.js`.
+- **Node.js dependency version compatibility matrix & update policy (#297)**: Published `docs/compatibility-matrix.md` and `docs/dependency-update-policy.md`. Pinned all direct production dependencies to exact versions in `backend/package.json`, and added `check:deps` audit script in root `package.json`.
+- **Centralized provider timeout & retry policy registry (#290)**: Extended `providerPolicyRegistry.js` with per-provider circuit-breaker configs and environment-variable policy overrides (`PROVIDER_<NAME>_TIMEOUT_MS`, `PROVIDER_<NAME>_MAX_ATTEMPTS`). Introduced `ProviderHttpClient` base class for external integrations and startup policy logging.
+- **Frontend analytics event schema (#270)**: Defined strict TypeScript union types in `analyticsEvents.d.ts`, documented event definitions and privacy rules in `docs/analytics-events.md`, and stamped `schemaVersion: "1.0.0"` onto all outgoing analytics payloads.
+
+### Dependencies
+
+- **Production dependencies pinned (#297)**: All 28 direct backend production dependencies (`@stellar/stellar-sdk`, `express`, `mongoose`, `ioredis`, `bullmq`, `axios`, etc.) are now pinned to exact semantic versions without loose ranges to ensure deterministic, reproducible deployments.
+
 - **Migrations 019–025 documentation (#1388)**: CHANGELOG and `docs/migrations.md` previously had no record of what migrations `019` through `025` do. Documented here so operators upgrading can tell what will run before they run `npm run migrate`:
   - **`019_add_reminder_time_window`** — Backfills `schools.settings.reminderTimeWindow` to `{ startHour: 8, endHour: 18 }` for any school missing it. Data-only, no index changes. Safe during a rolling deploy; idempotent (`$exists: false` filter). No prerequisites.
   - **`020_tenant_isolate_source_validation_rules`** — Fixes a tenant-isolation bug (#904): `sourcevalidationrules` had a global-unique index on `name`, so a rule created by one school collided with (and was visible to) another. Drops the old global `name_1` unique index, creates a compound unique index on `{ schoolId, name }` plus a lookup index on `{ schoolId }`, and backfills any rule missing `schoolId` to `DEFAULT_SCHOOL_ID` (falls back to `"SCH-DEFAULT"`). **Operator action required**: after running, review any rules backfilled to the default school — they were previously global and are now silently owned by one tenant. Index creation is foreground (not `background: true`); on a large `sourcevalidationrules` collection this can briefly hold a write lock — plan for a maintenance window on large deployments.

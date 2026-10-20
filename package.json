@@ -13,7 +13,8 @@
     "test:docker-healthcheck": "cross-env RUN_DOCKER_COMPOSE_HEALTHCHECK_TESTS=true jest tests/dockerComposeHealthCheck.test.js --forceExit",
     "seed": "node scripts/seed-test-data.js",
     "check-version-drift": "node scripts/check-version-drift.js",
-    "bundle-budget": "node scripts/bundle-budget.js"
+    "bundle-budget": "node scripts/bundle-budget.js",
+    "check:deps": "npm audit --audit-level=high"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

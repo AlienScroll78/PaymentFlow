@@ -240,8 +240,12 @@ const POLICIES = Object.freeze({
 // ── API ───────────────────────────────────────────────────────────────────────
 
 /**
- * Look up the policy for a provider + operation.
+ * Look up the policy for a provider + operation with optional environment variable overrides.
  * Falls back to the provider wildcard, then the global wildcard.
+ *
+ * Environment overrides:
+ *   PROVIDER_<PROVIDER>_<OPERATION>_TIMEOUT_MS or PROVIDER_<PROVIDER>_TIMEOUT_MS
+ *   PROVIDER_<PROVIDER>_<OPERATION>_MAX_ATTEMPTS or PROVIDER_<PROVIDER>_MAX_ATTEMPTS
  *
  * @param {string} provider  - e.g. 'stellar', 'coingecko', 'email'
  * @param {string} operation - e.g. 'getAccount', 'submitTransaction'
@@ -249,11 +253,54 @@ const POLICIES = Object.freeze({
  */
 function getPolicy(provider, operation) {
   const providerPolicies = POLICIES[provider] || POLICIES['*'];
-  return (
+  const basePolicy = (
     providerPolicies[operation] ||
     providerPolicies['*'] ||
     POLICIES['*']['*']
   );
+
+  const policy = {
+    ...basePolicy,
+    circuitBreaker: {
+      enabled: true,
+      failureThreshold: 5,
+      resetTimeoutMs: 30000,
+      ...(basePolicy.circuitBreaker || {}),
+    },
+  };
+
+  // Environment overrides
+  const provKey = String(provider).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const opKey = String(operation).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+
+  const envTimeout = process.env[`PROVIDER_${provKey}_${opKey}_TIMEOUT_MS`] ||
+                     process.env[`PROVIDER_${provKey}_TIMEOUT_MS`];
+  if (envTimeout && !isNaN(parseInt(envTimeout, 10))) {
+    policy.timeoutMs = parseInt(envTimeout, 10);
+  }
+
+  const envAttempts = process.env[`PROVIDER_${provKey}_${opKey}_MAX_ATTEMPTS`] ||
+                      process.env[`PROVIDER_${provKey}_MAX_ATTEMPTS`];
+  if (envAttempts && !isNaN(parseInt(envAttempts, 10))) {
+    policy.maxAttempts = parseInt(envAttempts, 10);
+  }
+
+  return policy;
+}
+
+/**
+ * Log configured policies at startup for observability.
+ */
+function logPolicies() {
+  logger.info('[ProviderPolicyRegistry] Initialized provider timeout and retry policies', {
+    defaults: {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxAttempts: DEFAULT_MAX_ATTEMPTS,
+      baseDelayMs: DEFAULT_BASE_DELAY_MS,
+      maxDelayMs: DEFAULT_MAX_DELAY_MS,
+    },
+    providers: Object.keys(POLICIES).filter((k) => k !== '*'),
+  });
 }
 
 /**
@@ -362,6 +409,7 @@ function _sleep(ms) {
 module.exports = {
   getPolicy,
   executeWithPolicy,
+  logPolicies,
   POLICIES,
   // Exported for testing
   _withTimeout,
