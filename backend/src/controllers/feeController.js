@@ -107,7 +107,10 @@ async function deleteFeeStructure(req, res, next) {
 
     if (affectedCount > 0) logger.warn('Fee structure deactivated with active obligations', { schoolId: req.schoolId, className, affectedStudents: affectedCount });
     del(KEYS.feesAll(), KEYS.feeByClass(className));
-    await audit(req, 'fee_delete', className, { className, feeAmount: fee.feeAmount });
+    await audit(req, 'fee_delete', className, {
+      before: { className, feeAmount: fee.feeAmount, isActive: true },
+      after: { className, feeAmount: fee.feeAmount, isActive: fee.isActive },
+    });
     res.json({ message: `Fee structure for class ${className} deactivated` });
   } catch (err) { next(err); }
 }
@@ -126,6 +129,7 @@ async function updateFeeStructure(req, res, next) {
     if (academicYear   !== undefined) updateFields.academicYear   = academicYear;
     if (paymentDeadline !== undefined) updateFields.paymentDeadline = paymentDeadline;
 
+    const before = await FeeStructure.findOne({ schoolId: req.schoolId, className, isActive: true }).lean();
     const fee = await FeeStructure.findOneAndUpdate({ schoolId: req.schoolId, className, isActive: true }, updateFields, { new: true, runValidators: true });
     if (!fee) return next(Object.assign(new Error(`No active fee structure found for class ${className}`), { code: 'NOT_FOUND' }));
 
@@ -198,7 +202,12 @@ async function updateFeeStructure(req, res, next) {
       }
     }
 
-    await audit(req, 'fee_update', className, { className, feeAmount, cascadeToStudents, studentsUpdated });
+    await audit(req, 'fee_update', className, {
+      before: before ? { feeAmount: before.feeAmount, description: before.description, academicYear: before.academicYear, paymentDeadline: before.paymentDeadline } : null,
+      after: { feeAmount: fee.feeAmount, description: fee.description, academicYear: fee.academicYear, paymentDeadline: fee.paymentDeadline },
+      cascadeToStudents,
+      studentsUpdated,
+    });
     res.json({ fee, studentsUpdated });
   } catch (err) { next(err); }
 }
