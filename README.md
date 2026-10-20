@@ -863,11 +863,13 @@ PaymentFlow/
 
 | Document | Description |
 |----------|-------------|
+| [`docs/quick-start.md`](docs/quick-start.md) | **Contributor quick-start guide** — clone to running tests in 15 min |
 | [`docs/architecture.md`](docs/architecture.md) | System design and data flow |
 | [`docs/api-spec.md`](docs/api-spec.md) | Full API reference |
 | [`docs/stellar-integration.md`](docs/stellar-integration.md) | Stellar-specific details |
 | [`docs/payment-limits.md`](docs/payment-limits.md) | Payment limits configuration |
 | [`docs/security.md`](docs/security.md) | Security model and threat analysis |
+| [`docs/key-rotation.md`](docs/key-rotation.md) | Signer key rotation runbook |
 | [`docs/WEBHOOK_INTEGRATION.md`](docs/WEBHOOK_INTEGRATION.md) | Webhook setup and HMAC verification |
 | [`docs/idempotency-payment-verification.md`](docs/idempotency-payment-verification.md) | Idempotency key design |
 | [`docs/QUICK_START_DOCKER.md`](docs/QUICK_START_DOCKER.md) | Docker quick start |
@@ -894,6 +896,8 @@ See [`CHANGELOG.md`](CHANGELOG.md) for a complete history of changes, breaking c
 ---
 
 ## Contributing
+
+**New here?** Start with the [**Contributor Quick-Start Guide →**](docs/quick-start.md) — it walks you through cloning, environment setup, running tests, and opening your first PR in under 15 minutes.
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
