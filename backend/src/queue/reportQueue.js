@@ -75,21 +75,30 @@ async function enqueueReportJob(jobData) {
       endDate: jobData.endDate || null,
       timezone: jobData.timezone || 'UTC',
       schemaVersion: jobData.schemaVersion || null,
+      format: jobData.format || 'json',
     },
     expiresAt,
   });
 
-  const job = await reportQueue.add(
-    'generate-report',
-    { jobId, ...jobData },
-    { jobId }
-  );
+  try {
+    await reportQueue.add(
+      'generate-report',
+      { jobId, ...jobData },
+      { jobId }
+    );
+  } catch (error) {
+    await ReportJob.findOneAndUpdate(
+      { jobId, status: REPORT_STATUSES.PENDING },
+      { status: REPORT_STATUSES.FAILED, completedAt: new Date(), 'result.error': error.message },
+    );
+    throw error;
+  }
 
   logger.info('[ReportQueue] Report job enqueued', { jobId, type: jobData.type, schoolId: jobData.schoolId });
   return { jobId, reportJob };
 }
 
-async function getReportJob(jobId) {
+function getReportJob(jobId) {
   return ReportJob.findOne({ jobId }).lean();
 }
 
@@ -106,7 +115,8 @@ async function getJobStatus(jobId) {
     createdAt: reportJob.createdAt,
     startedAt: reportJob.startedAt,
     completedAt: reportJob.completedAt,
-    downloadUrl: reportJob.status === REPORT_STATUSES.COMPLETED ? reportJob.downloadUrl : null,
+    downloadUrl: reportJob.status === REPORT_STATUSES.READY ? `/api/reports/${reportJob.jobId}/download` : null,
+    downloadExpiresAt: reportJob.downloadExpiresAt,
   };
 }
 
@@ -117,24 +127,42 @@ async function setJobProcessing(jobId) {
   );
 }
 
-async function setJobCompleted(jobId, result) {
+async function setJobCompleted(jobId, { artifactKey, schemaVersion = null }) {
+  const completedAt = new Date();
   const updated = await ReportJob.findOneAndUpdate(
     { jobId, status: REPORT_STATUSES.PROCESSING },
-    { status: REPORT_STATUSES.COMPLETED, completedAt: new Date(), result },
+    {
+      status: REPORT_STATUSES.READY,
+      completedAt,
+      downloadExpiresAt: new Date(completedAt.getTime() + 15 * 60 * 1000),
+      artifactKey,
+      'result.schemaVersion': schemaVersion,
+    },
     { new: true }
   ).lean();
 
   // Notify SSE clients so they receive push completion rather than polling.
   if (updated) {
     try {
+      const { createReportDownloadUrl } = require('../services/reportArtifactStorage');
+      const remainingSeconds = Math.max(1, Math.floor((updated.downloadExpiresAt.getTime() - Date.now()) / 1000));
+      const downloadUrl = await createReportDownloadUrl(updated.artifactKey, Math.min(15 * 60, remainingSeconds));
       sseService.emit(updated.schoolId, 'report:completed', {
         jobId: updated.jobId,
         type: updated.type,
-        downloadUrl: `/api/reports/jobs/${updated.jobId}/download`,
+        downloadUrl,
+        expiresAt: updated.downloadExpiresAt,
+      });
+      const { fireWebhookToEndpoints } = require('../services/webhookService');
+      await fireWebhookToEndpoints(updated.schoolId, 'report.ready', {
+        jobId: updated.jobId,
+        type: updated.type,
+        downloadUrl,
+        expiresAt: updated.downloadExpiresAt,
       });
     } catch (err) {
-      // SSE delivery is best-effort; do not fail the job on SSE errors.
-      logger.warn('[ReportQueue] SSE emit failed after job completion', { jobId, error: err.message });
+      // Notifications are best-effort; do not fail the job after the artifact is ready.
+      logger.warn('[ReportQueue] Completion notification failed', { jobId, error: err.message });
     }
   }
 }
