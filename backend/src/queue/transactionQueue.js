@@ -182,8 +182,8 @@ async function markInterrupted(txHash, reason) {
  * @returns {Promise<Job|null>}
  */
 async function enqueueTransaction(txHash, context = {}) {
-  const correlationId = resolveCorrelationId(context.correlationId, txHash);
-  const enrichedContext = { ...context, correlationId };
+  const correlationId = resolveCorrelationId(context.correlationId || context.requestId, txHash);
+  const enrichedContext = { ...context, correlationId, requestId: correlationId };
 
   // 1. Persist to MongoDB (durable, idempotent)
   await persistJob(txHash, enrichedContext);

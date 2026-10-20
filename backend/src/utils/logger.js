@@ -15,7 +15,10 @@
 
 const winston = require('winston');
 require('winston-daily-rotate-file');
+const { AsyncLocalStorage } = require('async_hooks');
 const { redactLogValue } = require('./redactConfig');
+
+const asyncLocalStorage = new AsyncLocalStorage();
 
 const SERVICE = process.env.SERVICE_NAME || 'paymentflow-backend';
 const ENVIRONMENT = process.env.NODE_ENV || 'development';
@@ -97,12 +100,16 @@ function formatMessage(level, message, ...args) {
     return arg;
   });
 
+  const store = asyncLocalStorage.getStore();
+  const correlationId = store?.correlationId || store?.requestId;
+
   return redactLogValue({
     timestamp,
     severity: level.toLowerCase(),
     service: SERVICE,
     environment: ENVIRONMENT,
     message,
+    ...(correlationId ? { correlationId, requestId: correlationId } : {}),
     context: formattedArgs.length > 0 ? Object.assign({}, ...formattedArgs.filter((arg) => arg && typeof arg === 'object' && !Array.isArray(arg))) : undefined,
     args: formattedArgs.length > 0 ? formattedArgs : undefined,
     pid: process.pid,
@@ -172,6 +179,7 @@ const logger = {
 
   setLevel,
   getLevel,
+  asyncLocalStorage,
 };
 
 const { redactConfig, SENSITIVE_KEYS } = require('./redactConfig');
@@ -180,5 +188,6 @@ module.exports = logger;
 module.exports.logger = logger;
 module.exports.setLevel = setLevel;
 module.exports.getLevel = getLevel;
+module.exports.asyncLocalStorage = asyncLocalStorage;
 module.exports.redactConfig = redactConfig;
 module.exports.SENSITIVE_KEYS = SENSITIVE_KEYS;
