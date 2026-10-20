@@ -7,6 +7,7 @@ import {
 } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
 const STATUS_META = {
@@ -324,12 +325,22 @@ function DisputesContent() {
             ))}
           </div>
         ) : disputes.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-muted)" }}>
-            <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>{t("disputes.empty")}</p>
-            <p style={{ fontSize: "0.8125rem" }}>
-              {statusFilter || studentFilter ? t("disputes.emptyFilters") : t("disputes.emptyNone")}
-            </p>
-          </div>
+          <EmptyState
+            variant={statusFilter || studentFilter ? "filtered" : "empty"}
+            title={t("disputes.empty")}
+            description={statusFilter || studentFilter ? t("disputes.emptyFilters") : t("disputes.emptyNone")}
+            action={
+              statusFilter || studentFilter
+                ? {
+                    label: t("disputes.clearFilters"),
+                    onClick: () => {
+                      setStatusFilter("");
+                      setStudentFilter("");
+                    },
+                  }
+                : undefined
+            }
+          />
         ) : (
           <div>
             <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>

@@ -7,6 +7,7 @@ import {
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
+import EmptyState from "../components/EmptyState";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 
 const EMPTY_FORM = { publicKey: "", label: "" };
@@ -162,10 +163,11 @@ export default function SourceValidationRules() {
         {loading ? (
           <div style={{ padding: "1.5rem" }}>Loading…</div>
         ) : rules.length === 0 ? (
-          <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-            <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>No rules yet</p>
-            <p style={{ fontSize: "0.8125rem" }}>Add a trusted sender above to get started.</p>
-          </div>
+          <EmptyState
+            variant="empty"
+            title="No rules yet"
+            description="Add a trusted sender above to get started."
+          />
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table className="data-table">

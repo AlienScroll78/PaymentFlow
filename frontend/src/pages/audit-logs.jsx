@@ -6,6 +6,7 @@ import {
 } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
 function formatTimestamp(isoString, t) {
@@ -336,10 +337,39 @@ function AuditLogsContent() {
               </table>
             </div>
           ) : logs.length === 0 ? (
-            <div className="al-empty">
-              <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>{t("auditLogs.noLogsFound")}</p>
-              <p style={{ fontSize: "0.8125rem" }}>{t("auditLogs.emptyFilters")}</p>
-            </div>
+            <EmptyState
+              variant={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? "filtered"
+                  : "empty"
+              }
+              title={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? t("auditLogs.emptyFilteredTitle")
+                  : t("auditLogs.noLogsFound")
+              }
+              description={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? t("auditLogs.emptyFilteredDesc")
+                  : t("auditLogs.emptyFilters")
+              }
+              action={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? {
+                      label: t("auditLogs.clearFilters"),
+                      onClick: () => {
+                        setActionFilter("");
+                        setTargetTypeFilter("");
+                        setResultFilter("");
+                        setActorIdInput("");
+                        setSearchInput("");
+                        setStartDate("");
+                        setEndDate("");
+                      },
+                    }
+                  : undefined
+              }
+            />
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">

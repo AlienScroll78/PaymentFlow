@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import RequireAdmin from "../components/RequireAdmin";
 import PageHero from "../components/PageHero";
+import EmptyState from "../components/EmptyState";
 import { IconAlertTriangle, IconCheck, IconX, IconPlus, IconRefresh } from "../components/Icons";
 import { useTranslation } from "react-i18next";
 
@@ -184,7 +185,11 @@ function WebhooksPage() {
             {loading ? (
               <div className="text-center p-4">{t("webhooks.loading")}</div>
             ) : endpoints.length === 0 ? (
-              <div className="text-center p-4">{t("webhooks.empty")}</div>
+              <EmptyState
+                variant="empty"
+                title={t("webhooks.empty")}
+                description={t("webhooks.emptyDesc")}
+              />
             ) : (
               <div className="table-responsive">
                 <table className="table table-sm">

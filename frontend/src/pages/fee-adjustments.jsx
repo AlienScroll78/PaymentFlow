@@ -11,6 +11,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { validateStellarAmount } from "../utils/stellarAmount";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
+import EmptyState from "../components/EmptyState";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 
 const RULE_TYPES = [
@@ -472,10 +473,11 @@ export default function FeeAdjustments() {
               </table>
             </div>
           ) : rules.length === 0 ? (
-            <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-              <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>{t("feeAdjustments.emptyTitle")}</p>
-              <p style={{ fontSize: "0.8125rem" }}>{t("feeAdjustments.emptyHint")}</p>
-            </div>
+            <EmptyState
+              variant="empty"
+              title={t("feeAdjustments.emptyTitle")}
+              description={t("feeAdjustments.emptyHint")}
+            />
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">

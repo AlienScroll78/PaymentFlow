@@ -11,6 +11,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 import { IconAlertTriangle, IconCheck, IconDollarSign } from "../components/Icons";
 import PageHero from "../components/PageHero";
+import EmptyState from "../components/EmptyState";
 
 const EMPTY_FORM = {
   className: "",
@@ -390,9 +391,11 @@ export default function FeesPage() {
             </div>
           ) : fees.length === 0 ? (
             <div className="card-body">
-              <p style={{ color: "var(--text-muted)" }}>
-                {t("fees.empty")}
-              </p>
+              <EmptyState
+                variant="onboarding"
+                title={t("fees.empty")}
+                description={t("fees.emptyDesc")}
+              />
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>

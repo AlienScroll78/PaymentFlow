@@ -6,6 +6,7 @@ import StudentForm from "../components/StudentForm";
 import PageHero, { StatCard } from "../components/PageHero";
 import SseDegradedBanner from "../components/SseDegradedBanner";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
@@ -444,14 +445,36 @@ function Dashboard() {
                       ))
                     ) : students.length === 0 ? (
                       <tr>
-                        <td colSpan="6">
-                          <div className="empty-state">
-                            <div className="empty-state-icon"><IconSearch size={26} /></div>
-                            <div className="empty-state-title">{t("dashboard.emptyTitle")}</div>
-                            <div className="empty-state-desc">
-                              {search || statusFilter !== "all" || classFilter ? t("dashboard.emptyFilters") : t("dashboard.emptyNone")}
-                            </div>
-                          </div>
+                        <td colSpan="6" style={{ padding: 0 }}>
+                          {(search || statusFilter !== "all" || classFilter) ? (
+                            <EmptyState
+                              variant="filtered"
+                              title={t("dashboard.emptyFiltersTitle")}
+                              description={t("dashboard.emptyFilters")}
+                              action={{
+                                label: t("dashboard.clearFilters"),
+                                onClick: () => {
+                                  setSearch("");
+                                  setStatusFilter("all");
+                                  setClassFilter("");
+                                },
+                              }}
+                            />
+                          ) : (
+                            <EmptyState
+                              variant="onboarding"
+                              title={t("dashboard.emptyTitle")}
+                              description={t("dashboard.emptyNone")}
+                              action={{
+                                label: t("dashboard.addFirstStudent"),
+                                onClick: () => {},
+                              }}
+                              secondaryAction={{
+                                label: t("dashboard.gettingStarted"),
+                                href: "/fees",
+                              }}
+                            />
+                          )}
                         </td>
                       </tr>
                     ) : students.map(s => {

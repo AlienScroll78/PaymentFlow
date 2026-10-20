@@ -4,6 +4,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconChevronLeft, IconChevronRight } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
 const STATUS_META = {
@@ -379,9 +380,16 @@ function Refunds() {
       )}
 
       {!loading && refunds.length === 0 && (
-        <div style={{ textAlign: "center", padding: "2rem", color: "var(--text-muted)" }}>
-          {t("refunds.emptyStatus")}
-        </div>
+        <EmptyState
+          variant={statusFilter && statusFilter !== "all" ? "filtered" : "empty"}
+          title={t("refunds.emptyStatus")}
+          description={t("refunds.emptyStatusDesc")}
+          action={
+            statusFilter && statusFilter !== "all"
+              ? { label: t("refunds.clearFilter"), onClick: () => setStatusFilter("all") }
+              : undefined
+          }
+        />
       )}
 
       {!loading && refunds.length > 0 && (
