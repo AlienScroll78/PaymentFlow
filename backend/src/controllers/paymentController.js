@@ -18,6 +18,7 @@ const {
   determineConfirmationState,
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
+const { transition: transitionPayment } = require('../services/paymentTransitionService');
 const { server } = require('../config/stellarConfig');
 const { ACCEPTED_ASSETS } = require('../config/stellarConfig');
 const { validateTransactionHash } = require('../utils/hashValidator');
@@ -239,34 +240,44 @@ async function submitTransaction(req, res, next) {
       paymentRecord = new Payment({ schoolId: req.schoolId, studentId: studentObj.studentId || memo, memo, amount: 0 });
     }
 
-    paymentRecord.transactionHash = normalizedHash;
-    paymentRecord.status = 'SUBMITTED';
-    paymentRecord.submittedAt = new Date();
-    await paymentRecord.save();
+    const transitionActor = req.user?.username || req.user?.id || 'payment-controller';
+    paymentRecord = (await transitionPayment(paymentRecord, 'SUBMITTED', {
+      performedBy: transitionActor,
+      schoolId: req.schoolId,
+      updates: { txHash: normalizedHash, transactionHash: normalizedHash, submittedAt: new Date() },
+      initialUpdates: { txHash: normalizedHash, transactionHash: normalizedHash },
+    })).payment;
 
     let txResponse;
     try {
       txResponse = await withStellarRetry(() => server.submitTransaction(tx), { label: 'submitTransaction' });
     } catch (err) {
-      paymentRecord.status = 'FAILED';
-      paymentRecord.suspicionReason = err.response?.data?.extras?.result_codes?.transaction ?? err.message;
-      await paymentRecord.save();
+      paymentRecord = (await transitionPayment(paymentRecord, 'FAILED', {
+        performedBy: transitionActor,
+        schoolId: req.schoolId,
+        updates: { suspicionReason: err.response?.data?.extras?.result_codes?.transaction ?? err.message },
+      })).payment;
       logger.warn('[PaymentController] submitTransaction on-chain failure', { txHash: normalizedHash, suspicionReason: paymentRecord.suspicionReason });
       return res.status(400).json({ error: 'Transaction submission failed', code: 'TX_SUBMISSION_FAILED' });
     }
 
     if (!txResponse.successful) {
-      paymentRecord.status = 'FAILED';
-      paymentRecord.confirmationStatus = 'failed';
-      paymentRecord.suspicionReason = 'Transaction was included in ledger but failed on-chain';
-      await paymentRecord.save();
+      paymentRecord = (await transitionPayment(paymentRecord, 'FAILED', {
+        performedBy: transitionActor,
+        schoolId: req.schoolId,
+        updates: {
+          confirmationStatus: 'failed',
+          suspicionReason: 'Transaction was included in ledger but failed on-chain',
+        },
+      })).payment;
       return res.status(400).json({ error: 'Transaction was included in the ledger but failed on-chain', code: 'TX_FAILED', hash: transactionHash });
     }
 
-    paymentRecord.status = 'SUCCESS';
-    paymentRecord.confirmedAt = new Date();
-    paymentRecord.ledgerSequence = txResponse.ledger;
-    await paymentRecord.save();
+    paymentRecord = (await transitionPayment(paymentRecord, 'SUCCESS', {
+      performedBy: transitionActor,
+      schoolId: req.schoolId,
+      updates: { confirmedAt: new Date(), ledgerSequence: txResponse.ledger },
+    })).payment;
 
     // Issue #1034: Update student balance fields using the unified balance updater.
     // This ensures submitTransaction produces the same Student state updates as

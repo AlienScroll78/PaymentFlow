@@ -91,12 +91,14 @@ function _computeEntryHash(fields) {
  * Fetch the most recent audit entry's entryHash for the given schoolId.
  * Used to link the new entry into the hash chain.
  */
-async function _getPrevHash(schoolId) {
-  const last = await AuditLog.findOne({ schoolId })
+async function _getPrevHash(schoolId, session = null) {
+  let query = AuditLog.findOne({ schoolId })
     .sort({ _id: -1 })
     .select('entryHash')
     .lean()
     .bypassTenantScope();
+  if (session) query = query.session(session);
+  const last = await query;
   return last ? (last.entryHash || null) : null;
 }
 
@@ -117,9 +119,11 @@ async function logAudit({
   ipAddress = null,
   userAgent = null,
   severity = null,
+  session = null,
+  throwOnFailure = false,
 }) {
   try {
-    const prevHash = await _getPrevHash(schoolId);
+    const prevHash = await _getPrevHash(schoolId, session);
     const createdAt = new Date();
 
     const entryHash = _computeEntryHash({
@@ -127,7 +131,7 @@ async function logAudit({
       details, result, errorMessage, ipAddress, prevHash, createdAt,
     });
 
-    await AuditLog.create({
+    const entry = {
       schoolId,
       action,
       performedBy,
@@ -142,10 +146,16 @@ async function logAudit({
       prevHash,
       entryHash,
       createdAt,
-    });
+    };
+    if (session) {
+      await AuditLog.create([entry], { session });
+    } else {
+      await AuditLog.create(entry);
+    }
   } catch (err) {
     _auditFailureCount += 1;
     logger.error('AUDIT_LOG_FAILURE', { err, schoolId, action });
+    if (throwOnFailure) throw err;
   }
 }
 
