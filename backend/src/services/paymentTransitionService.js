@@ -41,6 +41,8 @@ const {
 } = require('../constants/paymentStatus');
 const { logAudit } = require('./auditService');
 const logger = require('../utils/logger');
+const Outbox = require('../models/outboxModel');
+const { randomUUID } = require('crypto');
 
 class InvalidTransitionError extends Error {
   constructor(fromStatus, toStatus) {
@@ -137,6 +139,16 @@ async function transition(payment, toStatus, opts = {}) {
         session,
         throwOnFailure: true,
       });
+
+      if (opts.emitPaymentSaved) {
+        await Outbox.create([{
+          eventId: randomUUID(),
+          eventType: 'payment.saved',
+          aggregateId: current.txHash,
+          aggregateType: 'payment',
+          payload: current.toObject(),
+        }], { session });
+      }
 
       result = { ok: true, payment: current, previousStatus: fromStatus };
     });
