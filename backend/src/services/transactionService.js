@@ -36,16 +36,18 @@ async function savePayment(data, options = {}) {
     data = { ...data, referenceCode: await generateReferenceCode() };
   }
   try {
-    const payment = await Payment.create(data, { session, writeConcern: FINANCIAL_WRITE_CONCERN });
+    const payment = new Payment(data);
+    await payment.save(session ? { session } : {});
 
     const eventId = uuidv4();
-    await Outbox.create({
+    const outboxEvent = new Outbox({
       eventId,
       eventType: "payment.saved",
       aggregateId: payment.txHash,
       aggregateType: "payment",
       payload: payment.toObject(),
-    }, { session, writeConcern: FINANCIAL_WRITE_CONCERN });
+    });
+    await outboxEvent.save(session ? { session } : {});
 
     logger.debug("Payment saved with outbox event", {
       txHash: payment.txHash,

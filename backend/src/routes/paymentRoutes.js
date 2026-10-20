@@ -173,6 +173,7 @@ router.post(
 router.post(
   "/submit",
   validateSubmitTransaction,
+  idempotency,
   resolveSchool,
   submitTransaction,
 );
