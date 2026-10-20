@@ -202,6 +202,27 @@ const tpi = {
   components: {
     testnetBanner: "TESTNET — No salim manimani tru",
   },
+
+  dateRangePicker: {
+    ariaLabel: "Selekta bilong spes bilong de",
+    timezoneLabel: "De long {{tz}}",
+    changeTimezone: "Senisim taim zon",
+    hideTimezone: "Haitim taim zon",
+    timezoneSelectLabel: "Taim zon bilong yu",
+    presetsLabel: "Spes bilong de long taim",
+    fromLabel: "Stat long",
+    toLabel: "Pinis long",
+    fromAriaLabel: "De bilong stat",
+    toAriaLabel: "De bilong pinis",
+    preset: {
+      today: "Tude",
+      yesterday: "Asde",
+      last7: "7-pela de i go pinis",
+      thisMonth: "Dispela mun",
+      lastMonth: "Las mun",
+      custom: "Juisim yet",
+    },
+  },
 };
 
 export default tpi;

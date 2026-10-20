@@ -6,6 +6,7 @@ import {
 } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import DateRangePicker from "../components/DateRangePicker";
 import { useTranslation } from "react-i18next";
 
 function formatTimestamp(isoString, t) {
@@ -283,23 +284,14 @@ function AuditLogsContent() {
               />
             </div>
 
-            <div>
-              <label className="al-filter-label">{t("auditLogs.filterFromLabel")}</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                className="al-filter-input"
-              />
-            </div>
-
-            <div>
-              <label className="al-filter-label">{t("auditLogs.filterToLabel")}</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                className="al-filter-input"
+            <div style={{ gridColumn: "1 / -1" }}>
+              <DateRangePicker
+                startDate={startDate}
+                endDate={endDate}
+                onChange={({ startDate: s, endDate: e }) => {
+                  setStartDate(s);
+                  setEndDate(e);
+                }}
               />
             </div>
           </div>

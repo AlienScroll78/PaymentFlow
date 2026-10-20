@@ -795,6 +795,27 @@ const en = {
     nameRequired: "Name is required",
     parentEmailInvalid: "Enter a valid email address",
   },
+
+  dateRangePicker: {
+    ariaLabel: "Date range selector",
+    timezoneLabel: "Dates shown in {{tz}}",
+    changeTimezone: "Change timezone",
+    hideTimezone: "Hide timezone",
+    timezoneSelectLabel: "Timezone override",
+    presetsLabel: "Date range presets",
+    fromLabel: "From",
+    toLabel: "To",
+    fromAriaLabel: "Start date",
+    toAriaLabel: "End date",
+    preset: {
+      today: "Today",
+      yesterday: "Yesterday",
+      last7: "Last 7 Days",
+      thisMonth: "This Month",
+      lastMonth: "Last Month",
+      custom: "Custom",
+    },
+  },
 };
 
 export default en;

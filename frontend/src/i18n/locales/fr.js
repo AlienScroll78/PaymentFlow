@@ -794,6 +794,27 @@ const fr = {
     nameRequired: "Le nom est requis",
     parentEmailInvalid: "Entrez une adresse e-mail valide",
   },
+
+  dateRangePicker: {
+    ariaLabel: "Sélecteur de plage de dates",
+    timezoneLabel: "Dates affichées en {{tz}}",
+    changeTimezone: "Changer de fuseau horaire",
+    hideTimezone: "Masquer le fuseau horaire",
+    timezoneSelectLabel: "Fuseau horaire personnalisé",
+    presetsLabel: "Plages de dates prédéfinies",
+    fromLabel: "Du",
+    toLabel: "Au",
+    fromAriaLabel: "Date de début",
+    toAriaLabel: "Date de fin",
+    preset: {
+      today: "Aujourd'hui",
+      yesterday: "Hier",
+      last7: "7 derniers jours",
+      thisMonth: "Ce mois-ci",
+      lastMonth: "Mois dernier",
+      custom: "Personnalisé",
+    },
+  },
 };
 
 export default fr;

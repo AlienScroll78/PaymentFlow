@@ -6,6 +6,7 @@ import {
   IconCheck, IconTrendingUp, IconClock, IconX,
 } from "./Icons";
 import PageHero, { StatCard } from "./PageHero";
+import DateRangePicker from "./DateRangePicker";
 import { useTranslation } from "react-i18next";
 
 export default function ReportDownload() {
@@ -137,24 +138,14 @@ export default function ReportDownload() {
         </div>
         <div className="card-body">
           <form onSubmit={handleGenerate} style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">{t("reports.startDate")}</label>
-              <input
-                type="date"
-                className="form-input"
-                style={{ width: "auto" }}
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">{t("reports.endDate")}</label>
-              <input
-                type="date"
-                className="form-input"
-                style={{ width: "auto" }}
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
+            <div className="form-group" style={{ marginBottom: 0, minWidth: "340px", flex: "1 1 340px" }}>
+              <DateRangePicker
+                startDate={startDate}
+                endDate={endDate}
+                onChange={({ startDate: s, endDate: e }) => {
+                  setStartDate(s);
+                  setEndDate(e);
+                }}
               />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
