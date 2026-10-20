@@ -48,7 +48,7 @@ function InfoRow({ label, children }) {
   );
 }
 
-export default function PaymentForm({ initialStudentId = "" }) {
+export default function PaymentForm({ initialStudentId = "", disabled = false }) {
   const [studentId, setStudentId]             = useState(initialStudentId);
   const [shareCopied, setShareCopied]         = useState(false);
   const [student, setStudent]                 = useState(null);
@@ -274,7 +274,7 @@ export default function PaymentForm({ initialStudentId = "" }) {
                 className="form-input"
               />
             </div>
-            <button type="submit" disabled={loading} className="btn btn-dark" style={{ width: "100%" }}>
+            <button type="submit" disabled={loading || disabled} className="btn btn-dark" style={{ width: "100%" }}>
               {loading ? t("paymentForm.lookingUp") : t("paymentForm.submit")}
             </button>
           </form>

@@ -734,6 +734,12 @@ const en = {
     failed: "Live updates unavailable — refresh the page to restore real-time data.",
     reconnecting: "Reconnecting to live updates…",
     degraded: "Real-time updates degraded — some live events may not appear until connectivity is restored.",
+    verifyManually: "Verify manually",
+  },
+
+  offlineBanner: {
+    message: "You are offline.",
+    submsg: "Payment actions are disabled. Data will refresh automatically when you reconnect.",
   },
 
   errorBoundary: {

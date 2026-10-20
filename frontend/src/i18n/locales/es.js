@@ -202,6 +202,11 @@ const es = {
   components: {
     testnetBanner: "TESTNET — No envíe fondos reales",
   },
+
+  offlineBanner: {
+    message: "Estás sin conexión.",
+    submsg: "Las acciones de pago están deshabilitadas. Los datos se actualizarán automáticamente al reconectarte.",
+  },
 };
 
 export default es;

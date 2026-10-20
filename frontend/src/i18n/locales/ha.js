@@ -200,6 +200,11 @@ const ha = {
   components: {
     testnetBanner: "TESTNET — Kada ka aika kuɗi na gaske",
   },
+
+  offlineBanner: {
+    message: "Ba ka da haɗin intanet.",
+    submsg: "An kashe ayyukan biyan kuɗi. Bayanan za su sabunta kai tsaye lokacin da ka sake haɗawa.",
+  },
 };
 
 export default ha;

@@ -6,6 +6,7 @@ import "../styles/redesign.css";
 import Navbar from "../components/Navbar";
 import AppLayout from "../components/AppLayout";
 import ErrorBoundary from "../components/ErrorBoundary";
+import OfflineBanner from "../components/OfflineBanner";
 import { AdminAuthProvider } from "../hooks/AdminAuthContext";
 import i18n, { SUPPORTED_LOCALES } from "../i18n";
 
@@ -55,6 +56,7 @@ export default function MyApp({ Component, pageProps }) {
         <Head>
           <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         </Head>
+        <OfflineBanner />
         <Navbar />
         <ErrorBoundary>
           {useAppLayout ? (

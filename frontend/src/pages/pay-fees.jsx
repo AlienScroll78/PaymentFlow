@@ -4,6 +4,7 @@ import PaymentForm from "../components/PaymentForm";
 import VerifyPayment from "../components/VerifyPayment";
 import SseDegradedBanner from "../components/SseDegradedBanner";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { useTranslation } from "react-i18next";
 
 export default function PayFees() {
@@ -18,6 +19,8 @@ export default function PayFees() {
 
   // Surface degraded/reconnecting/failed banner (Issues #1054, #1078).
   const { degraded, connectionStatus } = usePaymentEvents();
+  // Track network connectivity to disable mutation actions while offline (Issue #269).
+  const { isOnline } = useOnlineStatus();
 
   const handleManualVerify = () => {
     verifyPaymentRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,9 +57,9 @@ export default function PayFees() {
 
         {/* Main content grid */}
         <div className="payfees-grid">
-          <PaymentForm />
+          <PaymentForm disabled={!isOnline} />
           <div ref={verifyPaymentRef}>
-            <VerifyPayment />
+            <VerifyPayment disabled={!isOnline} />
           </div>
         </div>
       </div>

@@ -7,6 +7,7 @@ import PageHero, { StatCard } from "../components/PageHero";
 import SseDegradedBanner from "../components/SseDegradedBanner";
 import RequireAdmin from "../components/RequireAdmin";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
@@ -63,6 +64,9 @@ function Dashboard() {
       }
     },
   });
+
+  // Offline / reconnection tracking (Issue #269).
+  const { justReconnected } = useOnlineStatus();
 
   const searchDebounceRef = useRef(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -139,6 +143,16 @@ function Dashboard() {
     }
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
   }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Issue #269 — automatically refresh data when network connectivity is
+  // restored after an offline period.
+  useEffect(() => {
+    if (justReconnected) {
+      fetchSummary();
+      fetchStudents(1, debouncedSearch, statusFilter, classFilter);
+      setPage(1);
+    }
+  }, [justReconnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSyncComplete(data) {
     setLastSyncAt(new Date().toISOString());
