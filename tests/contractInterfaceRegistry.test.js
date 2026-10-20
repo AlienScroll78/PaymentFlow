@@ -97,6 +97,7 @@ describe('discoverInterfaces — client discovery', () => {
 // ---------------------------------------------------------------------------
 describe('INTERFACE_IDS coverage', () => {
   const expectedEntryPoints = [
+    'version',
     'initialize', 'deposit', 'release', 'refund', 'dispute',
     'resolveDispute', 'pause', 'unpause', 'updateConfig', 'rotateSigner',
   ];
