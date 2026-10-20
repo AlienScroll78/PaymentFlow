@@ -4,6 +4,21 @@ import { verifyPayment } from "../services/api";
 import { parseStellarError } from "../utils/stellarErrors";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
+import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
+import PaymentFailureBanner from "./PaymentFailureBanner";
+
+const FEE_VALIDATION_SEVERITY = {
+  valid:     null,
+  overpaid:  "warning",
+  underpaid: "warning",
+  unknown:   "recoverable",
+};
+
+const FEE_VALIDATION_LABELS = {
+  overpaid:  "Overpayment detected",
+  underpaid: "Underpayment detected",
+  unknown:   "Validation inconclusive",
+};
 
 const STATUS_BADGE = {
   valid:     { cls: "badge badge-success", key: "status.validation.valid" },
@@ -109,21 +124,23 @@ export default function VerifyPayment() {
         </form>
 
         {error && (
-          <div ref={errorRef} role="alert" tabIndex="-1" className="alert alert-danger" style={{ marginTop: "1rem" }}>
-            <IconAlertTriangle size={15} />
-            <div>
-              <span>{error}</span>
-              {stellarStatusUrl && (
-                <a
-                  href={stellarStatusUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "block", marginTop: "0.375rem", color: "inherit", fontWeight: 600, textDecoration: "underline" }}
-                >
-                  {t("verifyPayment.checkNetworkStatus")}
-                </a>
-              )}
-            </div>
+          <div ref={errorRef} tabIndex="-1" style={{ marginTop: "1rem" }}>
+            <PaymentFailureBanner
+              severity={
+                error.toLowerCase().includes("network") || error.toLowerCase().includes("unavailable")
+                  ? "recoverable"
+                  : error.toLowerCase().includes("security") || error.toLowerCase().includes("block")
+                    ? "security"
+                    : "terminal"
+              }
+              title={t("verifyPayment.verificationFailed")}
+              message={error}
+              action={
+                stellarStatusUrl
+                  ? { label: t("verifyPayment.checkNetworkStatus"), href: stellarStatusUrl, external: true }
+                  : undefined
+              }
+            />
           </div>
         )}
 
@@ -145,14 +162,19 @@ export default function VerifyPayment() {
             </InfoRow>
             <InfoRow label={t("verifyPayment.memoLabel")} mono>{result.memo}</InfoRow>
             <InfoRow label={t("verifyPayment.date")}>
-              {result.date ? new Date(result.date).toLocaleString() : "—"}
+              {result.date
+                ? <TimestampDisplay iso={result.date} mode={DISPLAY_MODE.UTC} />
+                : "—"}
             </InfoRow>
-            {result.feeValidation?.message && (
-              <InfoRow label={t("verifyPayment.note")}>
-                <span style={{ color: st === "valid" ? "var(--success-text)" : "var(--warning-text)" }}>
-                  {result.feeValidation.message}
-                </span>
-              </InfoRow>
+            {result.feeValidation?.message && st !== "valid" && (
+              <div style={{ marginTop: "0.875rem" }}>
+                <PaymentFailureBanner
+                  severity={FEE_VALIDATION_SEVERITY[st] || "warning"}
+                  title={FEE_VALIDATION_LABELS[st] || "Validation issue"}
+                  message={result.feeValidation.message}
+                  compact={false}
+                />
+              </div>
             )}
             <div style={{ padding: "0.625rem 0" }}>
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>{t("verifyPayment.txHash")}</div>

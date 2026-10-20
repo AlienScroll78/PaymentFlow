@@ -12,6 +12,7 @@ import { validateStellarAmount } from "../utils/stellarAmount";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import { useOptimisticAction } from "../hooks/useOptimisticAction";
 
 const RULE_TYPES = [
   { value: "discount_percentage", labelKey: "feeAdjustments.ruleTypeDiscountPct" },
@@ -90,6 +91,25 @@ export default function FeeAdjustments() {
   const [deleteError, setDeleteError]       = useState(null);
   const [deleting, setDeleting]             = useState(false);
 
+  // Optimistic update for rule edits (Issue #8).
+  // Editing a rule is reversible (we can roll back the table row) and
+  // idempotent (re-submitting the same payload has the same effect).
+  // Non-reversible actions (deactivate/delete) do NOT use this hook —
+  // they go through the confirmation modal and remain server-confirmed.
+  const optimisticEdit = useOptimisticAction({
+    getSnapshot: () => [...rules],
+    onOptimisticApply: ({ id, payload }) => {
+      setRules(prev => prev.map(r => r._id === id ? { ...r, ...payload } : r));
+    },
+    onRollback: (_, snapshot) => {
+      if (snapshot) setRules(snapshot);
+    },
+    onFulfilled: () => {
+      // Reload from server to sync any server-computed fields (updatedAt etc).
+      load();
+    },
+  });
+
   const load = useCallback(() => {
     if (!schoolId) return; // Don't load until we have the authenticated school context
     setLoading(true);
@@ -161,14 +181,22 @@ export default function FeeAdjustments() {
     setSaving(true);
     try {
       if (editId) {
-        await updateFeeAdjustmentRule(editId, payload, schoolId);
+        // Reversible, idempotent edit — apply optimistically so the table
+        // updates immediately, then roll back if the server rejects (Issue #8).
+        await optimisticEdit.execute(
+          { id: editId, payload },
+          () => updateFeeAdjustmentRule(editId, payload, schoolId)
+        );
       } else {
         await createFeeAdjustmentRule(payload, schoolId);
+        // A new rule is not an edit, so reload unconditionally.
+        load();
       }
       setFormSuccess(true);
       setTimeout(() => setFormSuccess(false), 3000);
       cancelEdit();
-      load();
+      // Note: for edits, onFulfilled in optimisticEdit triggers load().
+      // For creates, load() was already called above.
     } catch (err) {
       setFormError(
         getErrorMessage(err.response?.data?.code, err.response?.data?.error) || t("feeAdjustments.saveFailed")

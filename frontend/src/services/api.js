@@ -1,10 +1,11 @@
 import axios from "axios";
 import { createRefreshHandler } from "./authRefresh";
+import { getEnvVar } from '../config/envValidation';
 
-const TIMEOUT_MS = parseInt(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT_MS || "15000", 10);
+const TIMEOUT_MS = parseInt(getEnvVar('NEXT_PUBLIC_REQUEST_TIMEOUT_MS', '15000'), 10);
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api",
+  baseURL: getEnvVar('NEXT_PUBLIC_API_URL', 'http://localhost:5000/api'),
   timeout: TIMEOUT_MS,
   withCredentials: true,
 });
@@ -47,6 +48,15 @@ function redirectToLogin() {
     // hard redirect below still ends the session from the app's perspective.
   }
 
+  // Issue #5 — give in-page listeners one tick to persist safe form-draft
+  // state to sessionStorage before we navigate away.  The event name is
+  // chosen to be explicit and un-guessable from external scripts.
+  try {
+    window.dispatchEvent(new Event("session:expired"));
+  } catch {
+    // dispatchEvent unavailable (SSR / test env) — safe to ignore.
+  }
+
   const returnTo = encodeURIComponent(`${pathname}${search}`);
   window.location.href = `/login?returnTo=${returnTo}`;
 }
@@ -79,13 +89,14 @@ export const getStudents = (page = 1, limit = 20, { search, status, className } 
 export const getStudent = (studentId, { signal } = {}) => api.get(`/students/${studentId}`, { signal });
 export const registerStudent = (data) => api.post("/students", data);
 export const updateStudent = (studentId, data) => api.patch(`/students/${studentId}`, data);
-export const getPaymentSummary = () => api.get("/payments/summary");
+// Payment endpoints — also available as a typed client via ./paymentApiClient
+export const getPaymentSummary = ({ signal } = {}) => api.get("/payments/summary", { signal });
 export const getPaymentInstructions = (studentId, { signal } = {}) => api.get(`/payments/instructions/${studentId}`, { signal });
 export const getStudentPayments = (studentId, { signal } = {}) => api.get(`/payments/${studentId}`, { signal });
 export const getStudentBalance  = (studentId, { signal } = {}) => api.get(`/payments/balance/${studentId}`, { signal });
 export const verifyPayment = (txHash) => api.post("/payments/verify", { txHash });
 export const syncPayments = () => api.post("/payments/sync");
-export const getSyncStatus = () => api.get("/payments/sync/status");
+export const getSyncStatus = ({ signal } = {}) => api.get("/payments/sync/status", { signal });
 export const getFeeStructures = () => api.get("/fees");
 export const createFeeStructure = (data) => api.post("/fees", data);
 export const getFeeByClass = (className) => api.get(`/fees/${className}`);
@@ -144,3 +155,10 @@ export const updateInstallment = (studentId, installmentIndex, data) =>
   api.patch(`/payment-plans/${studentId}/installment/${installmentIndex}`, data);
 export const cancelPaymentPlan = (studentId) =>
   api.delete(`/payment-plans/${studentId}`);
+
+// MFA
+export const setupUserMfa        = ()       => api.post("/auth/mfa/setup");
+export const verifyUserMfa       = (data)   => api.post("/auth/mfa/verify", data);
+export const disableUserMfa      = ()       => api.post("/auth/mfa/disable");
+export const getMfaBackupCodes   = ()       => api.get("/auth/mfa/backup-codes");
+export const regenerateBackupCodes = ()     => api.post("/auth/mfa/backup-codes/regenerate");
