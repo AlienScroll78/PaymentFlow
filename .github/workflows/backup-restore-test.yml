@@ -5,6 +5,14 @@ name: Backup restore test
 # match). Runs scripts/test-backup-recovery.sh so a corrupted backup or a
 # broken restore procedure is caught in CI instead of only being discovered
 # during a real disaster-recovery event. See issue #1413.
+#
+# Issue #342 enhancements:
+#   • Corrupt-backup simulation — a deliberately corrupted archive must trigger
+#     a test failure AND send a failure notification.
+#   • Slack/email notification on every run with pass/fail status and restore
+#     duration.
+#   • Restore duration is captured and uploaded as a CSV artefact so trends can
+#     be tracked over time to detect performance regressions.
 on:
   schedule:
     - cron: '0 3 * * 1' # every Monday at 03:00 UTC
@@ -39,9 +47,175 @@ jobs:
         run: |
           mongosh --quiet --eval "db.getSiblingDB('stellaredupay').restore_test_smoke.insertOne({ seededAt: new Date() })" mongodb://localhost:27017
 
+      # ── Restore duration tracking ────────────────────────────────────────────
+      # Capture wall-clock time for the restore verification step. The value is
+      # appended to a CSV artefact that accumulates across weekly runs so
+      # performance regressions can be spotted from trend data.
       - name: Run backup + restore verification
+        id: restore-test
         env:
           MONGO_URI: mongodb://localhost:27017/stellaredupay
           BACKEND_INTERNAL_URL: ${{ secrets.BACKUP_HEARTBEAT_URL }}
           BACKUP_NOTIFY_TOKEN: ${{ secrets.BACKUP_NOTIFY_TOKEN }}
-        run: bash scripts/test-backup-recovery.sh
+        run: |
+          START_TS=$(date +%s)
+          if bash scripts/test-backup-recovery.sh; then
+            END_TS=$(date +%s)
+            DURATION=$((END_TS - START_TS))
+            echo "restore_duration_seconds=${DURATION}" >> "$GITHUB_OUTPUT"
+            echo "restore_status=pass" >> "$GITHUB_OUTPUT"
+            echo "✅ Restore completed in ${DURATION}s"
+          else
+            END_TS=$(date +%s)
+            DURATION=$((END_TS - START_TS))
+            echo "restore_duration_seconds=${DURATION}" >> "$GITHUB_OUTPUT"
+            echo "restore_status=fail" >> "$GITHUB_OUTPUT"
+            echo "❌ Restore failed after ${DURATION}s"
+            exit 1
+          fi
+
+      # ── Corrupt backup simulation ────────────────────────────────────────────
+      # Deliberately corrupt a backup archive and confirm that the restore
+      # verification detects it and fails. A backup format change or silent
+      # corruption must never pass unnoticed.
+      - name: Simulate corrupt backup and verify failure detection
+        id: corrupt-test
+        env:
+          MONGO_URI: mongodb://localhost:27017/stellaredupay
+        run: |
+          set +e  # We expect non-zero exit from the corrupt test
+          
+          # Create a valid backup first
+          TMP_DIR=$(mktemp -d)
+          MONGO_URI="${MONGO_URI}" BACKUP_DIR="${TMP_DIR}" bash scripts/backup.sh
+          
+          # Find the backup file (named with a timestamp)
+          BACKUP_FILE=$(ls -t "${TMP_DIR}"/*.gz | head -1)
+          
+          if [[ -z "${BACKUP_FILE}" ]]; then
+            echo "❌ Could not create backup for corruption test"
+            exit 1
+          fi
+          
+          echo "Corrupting backup file: ${BACKUP_FILE}"
+          
+          # Corrupt the archive by overwriting bytes in the middle
+          # This simulates a truncated or bit-flipped backup
+          FILE_SIZE=$(stat -c%s "${BACKUP_FILE}")
+          CORRUPT_OFFSET=$((FILE_SIZE / 2))
+          dd if=/dev/urandom of="${BACKUP_FILE}" bs=1 count=256 seek="${CORRUPT_OFFSET}" conv=notrunc 2>/dev/null
+          
+          # Attempt to restore the corrupt backup — this MUST fail
+          RESTORE_OUTPUT=$(mongorestore --uri="${MONGO_URI}" --archive="${BACKUP_FILE}" --gzip --dryRun 2>&1)
+          RESTORE_EXIT=$?
+          
+          if [[ "${RESTORE_EXIT}" -eq 0 ]]; then
+            echo "❌ CRITICAL: Corrupt backup was accepted by mongorestore — corruption detection failed!"
+            echo "corrupt_detection=fail" >> "$GITHUB_OUTPUT"
+            rm -rf "${TMP_DIR}"
+            exit 1
+          else
+            echo "✅ Corrupt backup correctly rejected by mongorestore (exit code ${RESTORE_EXIT})"
+            echo "corrupt_detection=pass" >> "$GITHUB_OUTPUT"
+          fi
+          
+          rm -rf "${TMP_DIR}"
+          exit 0
+
+      # ── Restore duration trend artefact ───────────────────────────────────────
+      # Append the duration to a CSV so the trend can be downloaded and charted.
+      # This enables early detection of performance regressions in restore time.
+      - name: Record restore duration trend
+        if: always()
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DURATION="${{ steps.restore-test.outputs.restore_duration_seconds }}"
+          STATUS="${{ steps.restore-test.outputs.restore_status }}"
+          CORRUPT="${{ steps.corrupt-test.outputs.corrupt_detection }}"
+          mkdir -p artifacts
+          # Append to CSV with header if file doesn't exist
+          if [[ ! -f artifacts/restore-duration-trend.csv ]]; then
+            echo "timestamp,restore_duration_seconds,restore_status,corrupt_backup_detection" > artifacts/restore-duration-trend.csv
+          fi
+          echo "${TIMESTAMP},${DURATION:-0},${STATUS:-unknown},${CORRUPT:-unknown}" >> artifacts/restore-duration-trend.csv
+          cat artifacts/restore-duration-trend.csv
+
+      - name: Upload restore duration trend artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-duration-trend
+          path: artifacts/restore-duration-trend.csv
+          retention-days: 90
+
+      # ── Slack/email notification ──────────────────────────────────────────────
+      # Send a pass/fail notification to the ops channel with restore duration.
+      # Uses SLACK_WEBHOOK_URL secret. If not configured, the step is skipped.
+      - name: Send Slack notification
+        if: always()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          webhook-type: incoming-webhook
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Backup Restore Test — ${{ steps.restore-test.outputs.restore_status == 'pass' && '✅ PASSED' || '❌ FAILED' }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Backup Restore Test — ${{ steps.restore-test.outputs.restore_status == 'pass' && '✅ PASSED' || '❌ FAILED' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:* ${{ steps.restore-test.outputs.restore_status || 'unknown' }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Restore duration:* ${{ steps.restore-test.outputs.restore_duration_seconds || 'N/A' }}s"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Corrupt backup detection:* ${{ steps.corrupt-test.outputs.corrupt_detection || 'not run' }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View workflow run>"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      # ── Email fallback notification ──────────────────────────────────────────
+      # If Slack webhook is not configured, send an email notification instead.
+      - name: Send email notification (fallback)
+        if: always() && env.NOTIFY_EMAIL != ''
+        env:
+          NOTIFY_EMAIL: ${{ secrets.OPS_NOTIFY_EMAIL }}
+        run: |
+          STATUS="${{ steps.restore-test.outputs.restore_status || 'unknown' }}"
+          DURATION="${{ steps.restore-test.outputs.restore_duration_seconds || 'N/A' }}"
+          SUBJECT="[Backup Restore] ${STATUS} — duration ${DURATION}s"
+          BODY="Backup restore test result: ${STATUS}
+          Restore duration: ${DURATION} seconds
+          Corrupt backup detection: ${{ steps.corrupt-test.outputs.corrupt_detection || 'not run' }}
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          This is an automated notification from the weekly backup restore verification CI job."
+          if command -v sendmail &>/dev/null; then
+            echo "${BODY}" | sendmail -s "${SUBJECT}" "${NOTIFY_EMAIL}" || true
+          else
+            echo "sendmail not available — notification skipped"
+            echo "${SUBJECT}"
+            echo "${BODY}"
+          fi
+        continue-on-error: true
