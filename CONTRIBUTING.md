@@ -937,6 +937,76 @@ When reviewing others' PRs:
 
 ---
 
+## 📋 Architecture Decision Records (ADRs)
+
+Significant architectural decisions are captured as ADRs in [`docs/adr/`](docs/adr/). ADRs explain *why* a decision was made, what alternatives were evaluated, and what trade-offs were accepted.
+
+### When to write an ADR
+
+Write an ADR for any decision that:
+- Introduces or removes a runtime dependency (database, queue, external API)
+- Changes a core security model (auth, encryption, tenant isolation)
+- Affects the data model in a way that would be difficult to reverse
+- Chooses between multiple reasonable approaches that a future engineer might question
+
+You do **not** need an ADR for implementation details, refactors, or decisions that can be easily reversed.
+
+### ADR format
+
+ADRs follow the [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions):
+
+```markdown
+# ADR-NNN: Title
+
+**Status:** Proposed | Accepted | Deprecated | Superseded by ADR-NNN
+**Date:** YYYY-MM-DD
+**Authors:** ...
+
+## Context
+What is the problem, and what constraints apply?
+
+## Alternatives Evaluated
+| Option | ... | Verdict |
+|--------|-----|---------|
+| ... | ... | Chosen / Rejected because ... |
+
+## Decision
+What was decided?
+
+## Consequences
+Positive, negative, and risks accepted.
+
+## References
+Links to relevant code files and docs.
+```
+
+### File naming convention
+
+`docs/adr/<NNN>-<short-title>.md`
+
+Use the next available number (zero-padded to 3 digits). Example: `docs/adr/006-fee-adjustment-engine.md`.
+
+### Linking ADRs from code
+
+When a code file implements a decision described in an ADR, add a comment near the top:
+
+```javascript
+// See docs/adr/002-idempotency-strategy.md for the rationale behind
+// the three-layer idempotency approach used here.
+```
+
+### Existing ADRs
+
+| ADR | Decision |
+|-----|---------|
+| [ADR-001](docs/adr/001-stellar-for-settlement.md) | Use Stellar Network for payment settlement |
+| [ADR-002](docs/adr/002-idempotency-strategy.md) | Idempotency strategy for payment verification |
+| [ADR-003](docs/adr/003-webhook-delivery-model.md) | Webhook delivery model |
+| [ADR-004](docs/adr/004-multi-tenancy-isolation.md) | Multi-tenancy isolation approach |
+| [ADR-005](docs/adr/005-transaction-queue-and-retry-backend.md) | Transaction queue and retry backend selection |
+
+---
+
 ## 🆘 Getting Help
 
 - **Questions?** Open a [GitHub Discussion](https://github.com/yourusername/stellaredupay/discussions)
