@@ -8,3 +8,4 @@ groups:
           severity: critical
         annotations:
           summary: Admin alert fired
+          runbook_url: "https://github.com/onlyonee1/PaymentFlow/blob/main/docs/observability.md#admin-alerts"
