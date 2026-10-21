@@ -842,6 +842,10 @@ PaymentFlow/
 | [`docs/WEBHOOK_INTEGRATION.md`](docs/WEBHOOK_INTEGRATION.md) | Webhook setup and HMAC verification |
 | [`docs/idempotency-payment-verification.md`](docs/idempotency-payment-verification.md) | Idempotency key design |
 | [`docs/QUICK_START_DOCKER.md`](docs/QUICK_START_DOCKER.md) | Docker quick start |
+| [`docs/docker-troubleshooting.md`](docs/docker-troubleshooting.md) | Local Docker Compose troubleshooting — top issues, diagnostics, reset procedures |
+| [`docs/migrations.md`](docs/migrations.md) | Database migration authoring standards, rollback policy, and safe backfill patterns |
+| [`docs/api-pagination-filtering.md`](docs/api-pagination-filtering.md) | Cursor pagination and filtering guide with JS/Python examples and anti-patterns |
+| [`docs/runbooks/incident-response.md`](docs/runbooks/incident-response.md) | Incident response runbook — severity framework, SLAs, escalation, communication templates |
 | [`docs/payment-lifecycle.md`](docs/payment-lifecycle.md) | Payment status, confirmation, retry, and reconciliation lifecycle |
 | [`docs/environment-reference.md`](docs/environment-reference.md) | Complete environment-variable ownership and secret-sensitivity reference |
 
