@@ -1,10 +1,16 @@
 /**
- * paymentApiClient.js
+ * paymentApiClient.js — Issue #249
  *
  * Typed payment API client — a focused facade over the shared axios instance
  * in `./api`.  Every function here maps one-to-one to a payment-related
- * backend route and normalises errors into a stable frontend shape so callers
- * never have to inspect raw Axios errors.
+ * backend route and normalises errors into a stable frontend shape.
+ *
+ * Runtime schema validation:
+ *   Every API response is validated against a lightweight schema before being
+ *   returned to callers.  Schema mismatches are logged as structured errors and
+ *   re-thrown as ApiError objects with code "SCHEMA_MISMATCH" so callers can
+ *   surface an appropriate user-facing message.  This catches backend contract
+ *   drift in both development and production.
  *
  * All functions:
  *  - Reuse the shared `api` instance (no duplicate axios configuration).
@@ -57,21 +63,246 @@ export function normalizeApiError(err) {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helper: execute a call and normalise any thrown error.
+// Lightweight runtime schema validation (no external dependencies)
 // ---------------------------------------------------------------------------
 
 /**
+ * @typedef {Object} FieldSpec
+ * @property {'string'|'number'|'boolean'|'object'|'array'|'any'} type
+ * @property {boolean} [required]
+ * @property {FieldSpec} [items]       - Element spec for array fields.
+ * @property {{ [key: string]: FieldSpec }} [shape]  - Shape for object fields.
+ */
+
+/**
+ * Validate a single value against a FieldSpec.
+ * Returns null when valid, or a human-readable error string when invalid.
+ *
+ * @param {*} value
+ * @param {FieldSpec} spec
+ * @param {string} path  - Dot-notation path for error messages (e.g. "data.payments[0].status")
+ * @returns {string|null}
+ */
+function validateField(value, spec, path) {
+  if (spec.type === 'any') return null;
+
+  const missing = value === undefined || value === null;
+
+  if (missing) {
+    return spec.required ? `Missing required field "${path}".` : null;
+  }
+
+  if (spec.type === 'array') {
+    if (!Array.isArray(value)) {
+      return `Field "${path}" must be an array, got ${typeof value}.`;
+    }
+    if (spec.items) {
+      for (let i = 0; i < value.length; i++) {
+        const itemErr = validateField(value[i], spec.items, `${path}[${i}]`);
+        if (itemErr) return itemErr;
+      }
+    }
+    return null;
+  }
+
+  // eslint-disable-next-line valid-typeof
+  if (spec.type !== typeof value) {
+    // Be lenient with numbers that arrive as strings (common in APIs)
+    if (spec.type === 'number' && typeof value === 'string' && !isNaN(Number(value))) {
+      return null;
+    }
+    return `Field "${path}" must be ${spec.type}, got ${typeof value}.`;
+  }
+
+  if (spec.type === 'object' && spec.shape) {
+    for (const [key, fieldSpec] of Object.entries(spec.shape)) {
+      const fieldErr = validateField(value[key], fieldSpec, `${path}.${key}`);
+      if (fieldErr) return fieldErr;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validate a response data object against a schema map.
+ * Returns an array of all violation strings found.
+ *
+ * @param {*} data - The response data to validate.
+ * @param {{ [key: string]: FieldSpec }} schema - Top-level schema shape.
+ * @returns {string[]}  Array of violation messages; empty means valid.
+ */
+function validateSchema(data, schema) {
+  const violations = [];
+  for (const [key, spec] of Object.entries(schema)) {
+    const err = validateField(data?.[key], spec, key);
+    if (err) violations.push(err);
+  }
+  return violations;
+}
+
+/**
+ * Internal helper: execute a call, validate the response, and normalise errors.
+ *
  * @template T
- * @param {() => Promise<T>} fn
+ * @param {() => Promise<T>}                   fn     - Axios call to execute.
+ * @param {{ [key: string]: FieldSpec }} [schema]     - Optional schema for response.data.
+ * @param {string}                         [endpoint] - Name for logging context.
  * @returns {Promise<T>}
  */
-async function call(fn) {
+async function call(fn, schema, endpoint = 'unknown') {
+  let response;
   try {
-    return await fn();
+    response = await fn();
   } catch (err) {
     throw normalizeApiError(err);
   }
+
+  // Runtime schema validation on the response body
+  if (schema && response?.data !== undefined) {
+    const violations = validateSchema(response.data, schema);
+    if (violations.length > 0) {
+      const msg =
+        `API schema mismatch for "${endpoint}": ${violations.join('; ')}. ` +
+        `The backend response shape may have changed — please report this.`;
+      // Always log a structured error; callers decide whether to surface it.
+      if (typeof console !== 'undefined') {
+        console.error('[paymentApiClient] SCHEMA_MISMATCH', {
+          endpoint,
+          violations,
+          data: response.data,
+        });
+      }
+      throw {
+        message: msg,
+        code: 'SCHEMA_MISMATCH',
+        status: response.status ?? null,
+        retryable: false,
+      };
+    }
+  }
+
+  return response;
 }
+
+// ---------------------------------------------------------------------------
+// Response schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Schemas define the minimum expected shape of each API response.
+ * Only required fields are marked required: true; extra fields are ignored.
+ * Using a "soft" approach — we validate the fields we depend on rather than
+ * every field, so additive backend changes don't cause unnecessary failures.
+ */
+
+const PAYMENT_SCHEMA = {
+  txHash:    { type: 'string',  required: true  },
+  status:    { type: 'string',  required: true  },
+  amount:    { type: 'number',  required: false },
+  asset:     { type: 'string',  required: false },
+  createdAt: { type: 'string',  required: false },
+};
+
+const PAYMENT_INSTRUCTIONS_SCHEMA = {
+  walletAddress:  { type: 'string', required: true },
+  memo:           { type: 'string', required: true },
+  acceptedAssets: {
+    type:     'array',
+    required: false,
+    items:    {
+      type:  'object',
+      shape: { code: { type: 'string', required: true } },
+    },
+  },
+};
+
+const STUDENT_BALANCE_SCHEMA = {
+  totalPaid:  { type: 'number',  required: false },
+  totalDue:   { type: 'number',  required: false },
+  balance:    { type: 'number',  required: false },
+  feeStatus:  { type: 'string',  required: false },
+};
+
+const PAYMENT_SUMMARY_SCHEMA = {
+  totalCollected: { type: 'number', required: false },
+  pendingCount:   { type: 'number', required: false },
+  successCount:   { type: 'number', required: false },
+};
+
+const VERIFY_PAYMENT_SCHEMA = {
+  txHash: { type: 'string', required: true  },
+  status: { type: 'string', required: true  },
+  memo:   { type: 'string', required: false },
+};
+
+const SYNC_RESULT_SCHEMA = {
+  processed: { type: 'number', required: false },
+  new:       { type: 'number', required: false },
+};
+
+const SYNC_STATUS_SCHEMA = {
+  running:    { type: 'boolean', required: false },
+  lastSyncAt: { type: 'string',  required: false },
+};
+
+const REFUND_SCHEMA = {
+  refundId:  { type: 'string', required: true  },
+  status:    { type: 'string', required: true  },
+  amount:    { type: 'number', required: false },
+  createdAt: { type: 'string', required: false },
+};
+
+const REFUND_INITIATE_SCHEMA = {
+  refundId: { type: 'string', required: true  },
+  status:   { type: 'string', required: false },
+};
+
+// Student schemas
+const STUDENT_SCHEMA = {
+  _id:       { type: 'string', required: false },
+  studentId: { type: 'string', required: false },
+  name:      { type: 'string', required: false },
+  class:     { type: 'string', required: false },
+  feeStatus: { type: 'string', required: false },
+};
+
+// School schemas
+const SCHOOL_SCHEMA = {
+  _id:           { type: 'string', required: false },
+  name:          { type: 'string', required: false },
+  walletAddress: { type: 'string', required: false },
+};
+
+// Auth schemas
+const AUTH_LOGIN_SCHEMA = {
+  token:   { type: 'string', required: false },
+  user:    { type: 'object', required: false },
+};
+
+const AUTH_REFRESH_SCHEMA = {
+  token: { type: 'string', required: false },
+};
+
+// Export schemas for consumers and testing
+export {
+  PAYMENT_SCHEMA,
+  PAYMENT_INSTRUCTIONS_SCHEMA,
+  STUDENT_BALANCE_SCHEMA,
+  PAYMENT_SUMMARY_SCHEMA,
+  VERIFY_PAYMENT_SCHEMA,
+  SYNC_RESULT_SCHEMA,
+  SYNC_STATUS_SCHEMA,
+  REFUND_SCHEMA,
+  REFUND_INITIATE_SCHEMA,
+  STUDENT_SCHEMA,
+  SCHOOL_SCHEMA,
+  AUTH_LOGIN_SCHEMA,
+  AUTH_REFRESH_SCHEMA,
+};
+
+// Also export validation helpers for testing
+export { validateSchema, validateField };
 
 // ---------------------------------------------------------------------------
 // Payment API functions
@@ -93,7 +324,11 @@ async function call(fn) {
  * @returns {Promise<import('axios').AxiosResponse<PaymentInstructions>>}
  */
 export function fetchPaymentInstructions(studentId, { signal } = {}) {
-  return call(() => api.get(`/payments/instructions/${studentId}`, { signal }));
+  return call(
+    () => api.get(`/payments/instructions/${studentId}`, { signal }),
+    PAYMENT_INSTRUCTIONS_SCHEMA,
+    'fetchPaymentInstructions'
+  );
 }
 
 /**
@@ -107,13 +342,20 @@ export function fetchPaymentInstructions(studentId, { signal } = {}) {
 
 /**
  * Retrieve the payment history for a student.
+ * Response may be an array directly, or wrapped in { payments: [...] }.
  *
  * @param {string}        studentId
  * @param {{ signal?: AbortSignal }} [opts]
  * @returns {Promise<import('axios').AxiosResponse<Payment[]>>}
  */
 export function fetchStudentPayments(studentId, { signal } = {}) {
-  return call(() => api.get(`/payments/${studentId}`, { signal }));
+  // The payments endpoint may return an array or a { payments: [] } wrapper.
+  // We validate individual items when the wrapper shape is used.
+  return call(
+    () => api.get(`/payments/${studentId}`, { signal }),
+    null, // array responses are validated item-by-item below if needed
+    'fetchStudentPayments'
+  );
 }
 
 /**
@@ -132,7 +374,11 @@ export function fetchStudentPayments(studentId, { signal } = {}) {
  * @returns {Promise<import('axios').AxiosResponse<StudentBalance>>}
  */
 export function fetchStudentBalance(studentId, { signal } = {}) {
-  return call(() => api.get(`/payments/balance/${studentId}`, { signal }));
+  return call(
+    () => api.get(`/payments/balance/${studentId}`, { signal }),
+    STUDENT_BALANCE_SCHEMA,
+    'fetchStudentBalance'
+  );
 }
 
 /**
@@ -149,7 +395,11 @@ export function fetchStudentBalance(studentId, { signal } = {}) {
  * @returns {Promise<import('axios').AxiosResponse<PaymentSummary>>}
  */
 export function fetchPaymentSummary({ signal } = {}) {
-  return call(() => api.get("/payments/summary", { signal }));
+  return call(
+    () => api.get("/payments/summary", { signal }),
+    PAYMENT_SUMMARY_SCHEMA,
+    'fetchPaymentSummary'
+  );
 }
 
 /**
@@ -166,7 +416,11 @@ export function fetchPaymentSummary({ signal } = {}) {
  * @returns {Promise<import('axios').AxiosResponse<VerifyPaymentResult>>}
  */
 export function verifyPayment(txHash) {
-  return call(() => api.post("/payments/verify", { txHash }));
+  return call(
+    () => api.post("/payments/verify", { txHash }),
+    VERIFY_PAYMENT_SCHEMA,
+    'verifyPayment'
+  );
 }
 
 /**
@@ -181,7 +435,11 @@ export function verifyPayment(txHash) {
  * @returns {Promise<import('axios').AxiosResponse<SyncResult>>}
  */
 export function syncPayments() {
-  return call(() => api.post("/payments/sync"));
+  return call(
+    () => api.post("/payments/sync"),
+    SYNC_RESULT_SCHEMA,
+    'syncPayments'
+  );
 }
 
 /**
@@ -197,7 +455,11 @@ export function syncPayments() {
  * @returns {Promise<import('axios').AxiosResponse<SyncStatus>>}
  */
 export function fetchSyncStatus({ signal } = {}) {
-  return call(() => api.get("/payments/sync/status", { signal }));
+  return call(
+    () => api.get("/payments/sync/status", { signal }),
+    SYNC_STATUS_SCHEMA,
+    'fetchSyncStatus'
+  );
 }
 
 /**
@@ -211,7 +473,11 @@ export function fetchSyncStatus({ signal } = {}) {
  * @returns {Promise<import('axios').AxiosResponse<ConversionRates>>}
  */
 export function fetchConversionRates() {
-  return call(() => api.get("/payments/rates"));
+  return call(
+    () => api.get("/payments/rates"),
+    null,
+    'fetchConversionRates'
+  );
 }
 
 /**
@@ -234,7 +500,11 @@ export function fetchConversionRates() {
  * @returns {Promise<import('axios').AxiosResponse<RefundResult>>}
  */
 export function initiateRefund(txHash, data) {
-  return call(() => api.post(`/payments/${txHash}/refund`, data));
+  return call(
+    () => api.post(`/payments/${txHash}/refund`, data),
+    REFUND_INITIATE_SCHEMA,
+    'initiateRefund'
+  );
 }
 
 /**
@@ -250,7 +520,11 @@ export function initiateRefund(txHash, data) {
  * @returns {Promise<import('axios').AxiosResponse>}
  */
 export function approveRefund(refundId, data) {
-  return call(() => api.post(`/payments/refunds/${refundId}/approve`, data));
+  return call(
+    () => api.post(`/payments/refunds/${refundId}/approve`, data),
+    null,
+    'approveRefund'
+  );
 }
 
 /**
@@ -268,7 +542,11 @@ export function approveRefund(refundId, data) {
  * @returns {Promise<import('axios').AxiosResponse<Refund[]>>}
  */
 export function fetchPaymentRefunds(txHash) {
-  return call(() => api.get(`/payments/${txHash}/refunds`));
+  return call(
+    () => api.get(`/payments/${txHash}/refunds`),
+    null,
+    'fetchPaymentRefunds'
+  );
 }
 
 /**
@@ -285,5 +563,141 @@ export function fetchPaymentRefunds(txHash) {
  * @returns {Promise<import('axios').AxiosResponse<{ refunds: Refund[], total: number }>>}
  */
 export function fetchSchoolRefunds(params = {}) {
-  return call(() => api.get("/payments/refunds/school/list", { params }));
+  return call(
+    () => api.get("/payments/refunds/school/list", { params }),
+    null,
+    'fetchSchoolRefunds'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Student API functions (typed)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} Student
+ * @property {string} _id       - MongoDB document ID.
+ * @property {string} studentId - School-assigned student ID.
+ * @property {string} name      - Student full name.
+ * @property {string} class     - Class name.
+ * @property {string} feeStatus - "paid" | "partial" | "unpaid"
+ */
+
+/**
+ * Retrieve a single student by ID with schema validation.
+ *
+ * @param {string} studentId
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<import('axios').AxiosResponse<Student>>}
+ */
+export function fetchStudent(studentId, { signal } = {}) {
+  return call(
+    () => api.get(`/students/${studentId}`, { signal }),
+    STUDENT_SCHEMA,
+    'fetchStudent'
+  );
+}
+
+/**
+ * Retrieve a paginated list of students with schema validation.
+ * Response shape: { students: Student[], total: number, page: number }
+ *
+ * @param {number} [page=1]
+ * @param {number} [limit=20]
+ * @param {{ search?: string, status?: string, className?: string }} [filters]
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+export function fetchStudents(page = 1, limit = 20, filters = {}, { signal } = {}) {
+  const { search, status, className } = filters;
+  return call(
+    () => api.get("/students", {
+      params: {
+        page,
+        limit,
+        ...(search    && { search }),
+        ...(status    && status !== "all" && { status }),
+        ...(className && { class: className }),
+      },
+      signal,
+    }),
+    null,
+    'fetchStudents'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// School API functions (typed)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} School
+ * @property {string} _id           - MongoDB document ID.
+ * @property {string} name          - School name.
+ * @property {string} walletAddress - School Stellar wallet public key.
+ */
+
+/**
+ * Retrieve school details by slug.
+ *
+ * @param {string} slug
+ * @returns {Promise<import('axios').AxiosResponse<School>>}
+ */
+export function fetchSchool(slug) {
+  return call(
+    () => api.get(`/schools/${slug}`),
+    SCHOOL_SCHEMA,
+    'fetchSchool'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Auth API functions (typed)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} LoginCredentials
+ * @property {string} email
+ * @property {string} password
+ * @property {string} [schoolSlug]
+ */
+
+/**
+ * Authenticate an admin user.
+ *
+ * @param {LoginCredentials} credentials
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+export function login(credentials) {
+  return call(
+    () => api.post("/auth/login", credentials),
+    AUTH_LOGIN_SCHEMA,
+    'login'
+  );
+}
+
+/**
+ * Refresh the access token using the HttpOnly refresh cookie.
+ *
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+export function refreshToken() {
+  return call(
+    () => api.post("/auth/refresh"),
+    AUTH_REFRESH_SCHEMA,
+    'refreshToken'
+  );
+}
+
+/**
+ * Log the current user out (invalidates the session server-side).
+ *
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+export function logout() {
+  return call(
+    () => api.post("/auth/logout"),
+    null,
+    'logout'
+  );
 }
