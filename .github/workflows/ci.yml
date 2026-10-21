@@ -35,7 +35,7 @@ jobs:
             backend/node_modules
             frontend/node_modules
             node_modules
-          key: \( {{ runner.os }}-node- \){{ hashFiles('**/package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
       - run: npm ci
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: backend/node_modules
-          key: \( {{ runner.os }}-backend-node- \){{ hashFiles('backend/package-lock.json') }}
+          key: ${{ runner.os }}-backend-node-${{ hashFiles('backend/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-backend-node-
       - name: Install backend dependencies
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: frontend/node_modules
-          key: \( {{ runner.os }}-frontend-node- \){{ hashFiles('frontend/package-lock.json') }}
+          key: ${{ runner.os }}-frontend-node-${{ hashFiles('frontend/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-frontend-node-
       - name: Install frontend dependencies
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: frontend/node_modules
-          key: \( {{ runner.os }}-frontend-node- \){{ hashFiles('frontend/package-lock.json') }}
+          key: ${{ runner.os }}-frontend-node-${{ hashFiles('frontend/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-frontend-node-
       - name: Install frontend dependencies
@@ -203,7 +203,7 @@ jobs:
             backend/node_modules
             frontend/node_modules
             node_modules
-          key: \( {{ runner.os }}-node- \){{ hashFiles('**/package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
       - run: npm ci
