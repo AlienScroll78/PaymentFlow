@@ -1,5 +1,5 @@
 /**
- * _app.jsx — Issue #9
+ * _app.jsx — Issue #9, #250
  *
  * Error boundary layering:
  *
@@ -10,7 +10,19 @@
  * The route-level boundary key ensures that navigating away from a broken page
  * fully unmounts the failed subtree and mounts a fresh boundary, so the user
  * never sees a stale error screen after clicking a navigation link.
+ *
+ * Environment validation (Issue #250):
+ * validateEnv() runs at module evaluation time — before the React tree is
+ * constructed — so misconfigured deployments fail immediately with a clear
+ * descriptive message rather than a cryptic runtime error deep in a component.
  */
+
+// ── Environment validation ─────────────────────────────────────────────────
+// This runs synchronously before any component renders.  In production it
+// throws (halting the app with a clear message); in development it warns.
+import { validateEnv } from "../config/envValidation";
+validateEnv();
+// ──────────────────────────────────────────────────────────────────────────
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/router";
