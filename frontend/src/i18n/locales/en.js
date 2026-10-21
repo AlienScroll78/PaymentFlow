@@ -278,6 +278,7 @@ const en = {
     verifying: "Verifying…",
     submit: "Verify Transaction",
     verificationFailed: "Verification failed. Check the transaction hash and try again.",
+    alreadyCreated: "This payment has already been created. No duplicate was recorded.",
     checkNetworkStatus: "Check Stellar Network Status ↗",
     transactionFound: "Transaction Found",
     amount: "Amount",

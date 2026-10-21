@@ -1,9 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { verifyPayment } from "../services/api";
 import { parseStellarError } from "../utils/stellarErrors";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
+import { generateIdempotencyKey } from "../utils/idempotencyKey";
 
 const STATUS_BADGE = {
   valid:     { cls: "badge badge-success", key: "status.validation.valid" },
@@ -45,13 +46,41 @@ export default function VerifyPayment() {
   const [loading, setLoading]             = useState(false);
   const errorRef = useRef(null);
 
+  // One idempotency key per form session — generated on mount, cleared only
+  // after a confirmed 2xx success. Retries reuse the same key so the backend
+  // deduplicates duplicate verification requests.
+  const idempotencyKeyRef = useRef(null);
+  useEffect(() => {
+    idempotencyKeyRef.current = generateIdempotencyKey();
+    return () => {
+      // Reset the key when the component unmounts so a fresh mount gets a new one.
+      idempotencyKeyRef.current = null;
+    };
+  }, []);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError(""); setResult(null); setStellarStatusUrl(null); setLoading(true);
     try {
-      const res = await verifyPayment(txHash.trim());
+      const res = await verifyPayment(txHash.trim(), idempotencyKeyRef.current);
       setResult(res.data);
+      // Confirmed success — clear the key so a subsequent submission (new
+      // transaction hash) gets a fresh key rather than reusing the old one.
+      idempotencyKeyRef.current = generateIdempotencyKey();
     } catch (err) {
+      // 409 Conflict means the backend already processed this idempotency key
+      // (duplicate submission). Treat it as a successful deduplication.
+      if (err.response?.status === 409) {
+        const existingResult = err.response?.data?.data ?? err.response?.data;
+        if (existingResult) {
+          setResult(existingResult);
+          idempotencyKeyRef.current = generateIdempotencyKey();
+          return;
+        }
+        setError(t("verifyPayment.alreadyCreated"));
+        errorRef.current?.focus();
+        return;
+      }
       const stellar = parseStellarError(err);
       if (stellar) {
         setError(stellar.message);
