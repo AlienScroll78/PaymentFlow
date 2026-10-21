@@ -57,10 +57,6 @@ function AuditLogsContent() {
   // unmounts to prevent stale responses from updating the wrong route's state.
   const { signal } = useAbortController();
 
-  // Issue #254 — abort in-flight audit-log requests when the component
-  // unmounts to prevent stale responses from updating the wrong route's state.
-  const { signal } = useAbortController();
-
   // Debounce the free-text inputs so we don't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setActorIdFilter(actorIdInput.trim()), 350);

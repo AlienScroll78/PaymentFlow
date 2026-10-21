@@ -149,8 +149,8 @@ export const updateSchool = (slug, data) => api.patch(`/schools/${slug}`, data);
 // Payment plans
 export const createPaymentPlan = (studentId, data) =>
   api.post(`/payment-plans/${studentId}`, data);
-export const getPaymentPlan = (studentId) =>
-  api.get(`/payment-plans/${studentId}`);
+export const getPaymentPlan = (studentId, { signal } = {}) =>
+  api.get(`/payment-plans/${studentId}`, { signal });
 export const updateInstallment = (studentId, installmentIndex, data) =>
   api.patch(`/payment-plans/${studentId}/installment/${installmentIndex}`, data);
 export const cancelPaymentPlan = (studentId) =>
@@ -162,3 +162,15 @@ export const verifyUserMfa       = (data)   => api.post("/auth/mfa/verify", data
 export const disableUserMfa      = ()       => api.post("/auth/mfa/disable");
 export const getMfaBackupCodes   = ()       => api.get("/auth/mfa/backup-codes");
 export const regenerateBackupCodes = ()     => api.post("/auth/mfa/backup-codes/regenerate");
+
+// Source validation rules (trusted-sender allowlist)
+export const getSourceValidationRules = (schoolId, { signal } = {}) =>
+  api.get("/source-validation-rules", { headers: { "X-School-ID": schoolId }, signal });
+export const createSourceValidationRule = (data, schoolId) =>
+  api.post("/source-validation-rules", data, { headers: { "X-School-ID": schoolId } });
+export const deleteSourceValidationRule = (id, schoolId) =>
+  api.delete(`/source-validation-rules/${id}`, { headers: { "X-School-ID": schoolId } });
+
+// Fee adjustment helpers
+export const getFeeAdjustmentAffectedCount = (ruleId, schoolId) =>
+  api.get(`/fee-adjustments/${ruleId}/affected-count`, { headers: { "X-School-ID": schoolId } });
