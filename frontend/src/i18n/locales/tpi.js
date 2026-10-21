@@ -56,6 +56,22 @@ const tpi = {
     staff: "Sisim",
   },
 
+  pagination: {
+    label: "Pes",
+    firstPage: "Fes pes bilong bipo",
+    lastPage: "Las pes",
+    previousPage: "Pes bilong bipo",
+    nextPage: "Nekis pes",
+    firstPageAria: "Go long fes pes bilong {{total}}",
+    lastPageAria: "Go long las pes bilong {{total}}",
+    previousPageAria: "Go long pes bilong bipo (pes {{page}} bilong {{total}})",
+    nextPageAria: "Go long nekis pes (pes {{page}} bilong {{total}})",
+    pageAria: "Pes {{page}} bilong {{total}}",
+    ellipsis: "Moa pes",
+    rangeOf: "{{start}}–{{end}} bilong {{total}} {itemLabel}",
+    shortcutHint: "Tekem g na namba long go long wanpela pes",
+  },
+
   time: {
     never: "Neva",
     justNow: "Nau tasol",

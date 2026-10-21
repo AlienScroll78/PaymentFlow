@@ -8,11 +8,12 @@ import SseDegradedBanner from "../components/SseDegradedBanner";
 import RequireAdmin from "../components/RequireAdmin";
 import BlockchainStatusBadge from "../components/BlockchainStatusBadge";
 import { TableDensityControl, useTableDensity } from "../components/TableDensityControl";
+import AccessiblePagination from "../components/AccessiblePagination";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
-  IconSearch, IconChevronLeft, IconChevronRight,
+  IconSearch,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 
@@ -630,34 +631,18 @@ function Dashboard() {
 
           {/* Pagination */}
           {total > 0 && (
-            <div style={{ padding: "0.875rem 1.25rem", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-              <span className="pagination-info" aria-live="polite" aria-atomic="true">
-                {studentsLoading ? t("actions.loading") : t("dashboard.rangeOf", { start: rangeStart, end: rangeEnd, total: total.toLocaleString() })}
-              </span>
-              <nav className="pagination-controls" aria-label={t("dashboard.paginationAria")}>
-                <button
-                  className="page-btn"
-                  disabled={page === 1 || studentsLoading}
-                  onClick={() => setPage(p => p - 1)}
-                  aria-label={t("actions.previousPage")}
-                  style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
-                >
-                  <IconChevronLeft size={15} /> {t("actions.prev")}
-                </button>
-                <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", padding: "0 0.25rem" }} aria-current="page">
-                  {page} / {pages}
-                </span>
-                <button
-                  className="page-btn"
-                  disabled={page === pages || studentsLoading}
-                  onClick={() => setPage(p => p + 1)}
-                  aria-label={t("actions.nextPage")}
-                  style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
-                >
-                  {t("actions.next")} <IconChevronRight size={15} />
-                </button>
-              </nav>
-            </div>
+            <AccessiblePagination
+              currentPage={page}
+              totalPages={pages}
+              onPageChange={setPage}
+              total={total}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              loading={studentsLoading}
+              ariaLabel={t("dashboard.paginationAria")}
+              itemLabel={t("dashboard.studentsTitle")}
+              rangeTemplate={t("dashboard.rangeOf", { start: rangeStart, end: rangeEnd, total: total.toLocaleString() })}
+            />
           )}
         </div>
       </div>

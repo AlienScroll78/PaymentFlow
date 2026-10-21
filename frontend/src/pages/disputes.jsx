@@ -3,10 +3,11 @@ import { getDisputes, resolveDispute } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
 import {
   IconAlertTriangle, IconExternalLink,
-  IconChevronLeft, IconChevronRight, IconSearch,
+  IconSearch,
 } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import AccessiblePagination from "../components/AccessiblePagination";
 import { useTranslation } from "react-i18next";
 
 const STATUS_META = {
@@ -347,27 +348,18 @@ function DisputesContent() {
             ))}
 
             {totalPages > 1 && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem" }}>
-                <span className="pagination-info">{t("disputes.pageOf", { page, total: totalPages })}</span>
-                <div className="pagination-controls">
-                  <button
-                    className="page-btn"
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
-                  >
-                    <IconChevronLeft size={15} /> {t("actions.prev")}
-                  </button>
-                  <button
-                    className="page-btn"
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                    style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
-                  >
-                    {t("actions.next")} <IconChevronRight size={15} />
-                  </button>
-                </div>
-              </div>
+              <AccessiblePagination
+                currentPage={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                total={totalCount}
+                rangeStart={(page - 1) * 20 + 1}
+                rangeEnd={Math.min(page * 20, totalCount)}
+                loading={loading}
+                ariaLabel={t("disputes.title")}
+                itemLabel={t("disputes.title")}
+              />
+            )}
             )}
           </div>
         )}
