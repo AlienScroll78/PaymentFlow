@@ -97,7 +97,7 @@ export const getStudentBalance  = (studentId, { signal } = {}) => api.get(`/paym
 export const verifyPayment = (txHash) => api.post("/payments/verify", { txHash });
 export const syncPayments = () => api.post("/payments/sync");
 export const getSyncStatus = ({ signal } = {}) => api.get("/payments/sync/status", { signal });
-export const getFeeStructures = () => api.get("/fees");
+export const getFeeStructures = ({ signal } = {}) => api.get("/fees", { signal });
 export const createFeeStructure = (data) => api.post("/fees", data);
 export const getFeeByClass = (className) => api.get(`/fees/${className}`);
 export const deleteFeeStructure = (className) => api.delete(`/fees/${encodeURIComponent(className)}`);
@@ -115,7 +115,7 @@ export const getConversionRates = () => api.get("/payments/rates");
 
 // Disputes
 export const flagDispute = (data) => api.post("/disputes", data);
-export const getDisputes = (params = {}) => api.get("/disputes", { params });
+export const getDisputes = (params = {}, { signal } = {}) => api.get("/disputes", { params, signal });
 export const getDisputeById = (id) => api.get(`/disputes/${id}`);
 export const resolveDispute = (id, data) =>
   api.patch(`/disputes/${id}/resolve`, data);
@@ -124,17 +124,17 @@ export const resolveDispute = (id, data) =>
 export const initiateRefund = (txHash, data) => api.post(`/payments/${txHash}/refund`, data);
 export const approveRefund = (refundId, data) => api.post(`/payments/refunds/${refundId}/approve`, data);
 export const getPaymentRefunds = (txHash) => api.get(`/payments/${txHash}/refunds`);
-export const getSchoolRefunds = (params = {}) => api.get("/payments/refunds/school/list", { params });
+export const getSchoolRefunds = (params = {}, { signal } = {}) => api.get("/payments/refunds/school/list", { params, signal });
 
 // Audit logs
 export const getRecentAuditLogs = (limit = 10) =>
   api.get("/audit-logs/recent", { params: { limit } });
-export const getAuditLogs = (params = {}) =>
-  api.get("/audit-logs", { params });
+export const getAuditLogs = (params = {}, { signal } = {}) =>
+  api.get("/audit-logs", { params, signal });
 
 // Fee adjustment rules
-export const getFeeAdjustmentRules = (schoolId) =>
-  api.get("/fee-adjustments", { headers: { "X-School-ID": schoolId } });
+export const getFeeAdjustmentRules = (schoolId, { signal } = {}) =>
+  api.get("/fee-adjustments", { headers: { "X-School-ID": schoolId }, signal });
 export const createFeeAdjustmentRule = (data, schoolId) =>
   api.post("/fee-adjustments", data, { headers: { "X-School-ID": schoolId } });
 export const updateFeeAdjustmentRule = (id, data, schoolId) =>
