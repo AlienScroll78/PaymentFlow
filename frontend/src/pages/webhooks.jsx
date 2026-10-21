@@ -4,6 +4,7 @@ import PageHero from "../components/PageHero";
 import { IconAlertTriangle, IconCheck, IconX, IconPlus, IconRefresh } from "../components/Icons";
 import { useTranslation } from "react-i18next";
 import { formatRelative } from "../utils/dateTime";
+import { SkeletonTable } from "../components/Skeleton";
 
 async function apiCall(method, path, body = null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -177,7 +178,7 @@ function WebhooksPage() {
           </div>
           <div className="card-body">
             {loading ? (
-              <div className="text-center p-4">{t("webhooks.loading")}</div>
+              <SkeletonTable columns={["100%", 70, 65, 100, 60]} rows={5} className="table table-sm" />
             ) : endpoints.length === 0 ? (
               <div className="text-center p-4">{t("webhooks.empty")}</div>
             ) : (

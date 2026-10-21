@@ -5,6 +5,7 @@ import { IconAlertTriangle, IconCheck, IconChevronLeft, IconChevronRight } from 
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import { useTranslation } from "react-i18next";
+import { SkeletonDetailCard } from "../components/Skeleton";
 
 const STATUS_META = {
   approval_pending: { cls: "badge-warning",  labelKey: "status.refund.approval_pending", color: "var(--warning)" },
@@ -373,8 +374,10 @@ function Refunds() {
       )}
 
       {loading && (
-        <div style={{ textAlign: "center", padding: "2rem", color: "var(--text-muted)" }}>
-          {t("actions.loading")}
+        <div role="status" aria-live="polite" aria-busy="true" aria-label="Loading..." style={{ display: "grid", gap: "1rem" }}>
+          <SkeletonDetailCard rows={3} />
+          <SkeletonDetailCard rows={3} />
+          <SkeletonDetailCard rows={3} />
         </div>
       )}
 

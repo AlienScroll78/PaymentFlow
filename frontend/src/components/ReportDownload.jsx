@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getReport } from "../services/api";
 import { getReportCsvUrl } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
-import { getServerFilename } from "../utils/downloadBlob";
+import { downloadFile } from "../utils/downloadBlob";
 import {
   IconCalendar, IconDownload, IconBarChart, IconAlertTriangle,
   IconCheck, IconTrendingUp, IconClock, IconX,
@@ -11,6 +11,7 @@ import PageHero, { StatCard } from "./PageHero";
 import { StandaloneEmptyState } from "./EmptyState";
 import { useTranslation } from "react-i18next";
 import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
+import { SkeletonDetailCard } from "./Skeleton";
 
 export default function ReportDownload() {
   const { t } = useTranslation();
@@ -23,8 +24,10 @@ export default function ReportDownload() {
   const [error, setError]         = useState("");
   const [loading, setLoading]     = useState(false);
   const [csvLoading, setCsvLoading] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState("");
   const [reportHistory, setReportHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const downloadAbortRef = useRef(null);
 
   useEffect(() => {
     loadReportHistory();
@@ -87,44 +90,72 @@ export default function ReportDownload() {
     if (studentId) params.studentId = studentId;
     if (paymentStatus) params.paymentStatus = paymentStatus;
 
-    // Clear any previous error before starting a new download.
+    const fallbackFilename =
+      startDate && endDate
+        ? `report-${startDate}_to_${endDate}.csv`
+        : "report-all-time.csv";
+    const reportUrl = getReportCsvUrl(params);
     setError("");
+    setDownloadStatus("");
 
     try {
       setCsvLoading(true);
-      const url = getReportCsvUrl(params);
-      const response = await fetch(url, {
+      const days = startDate && endDate
+        ? Math.ceil((new Date(endDate) - new Date(startDate)) / 86400000) + 1
+        : Number.POSITIVE_INFINITY;
+
+      if (days < 30) {
+        downloadFile(reportUrl, fallbackFilename);
+        return;
+      }
+
+      const controller = new AbortController();
+      downloadAbortRef.current = controller;
+      setDownloadStatus("Starting report generation...");
+      const response = await fetch(`${reportUrl}&async=true`, {
         credentials: "include",
-        headers: { format: "csv" },
+        signal: controller.signal,
       });
-      if (!response.ok) throw new Error(t("reports.downloadError"));
-      const blob = await response.blob();
+      if (response.status !== 202) {
+        if (!response.ok) throw new Error(t("reports.downloadError"));
+        downloadFile(reportUrl, fallbackFilename);
+        return;
+      }
 
-      // Prefer the server-supplied filename from Content-Disposition; fall
-      // back to a locally-derived name that includes the selected date range.
-      const fallbackFilename =
-        startDate && endDate
-          ? `report-${startDate}_to_${endDate}.csv`
-          : "report-all-time.csv";
-      const filename = getServerFilename(response, fallbackFilename);
+      let job = await response.json();
+      const statusUrl = new URL(job.statusUrl, reportUrl).href;
+      while (job.status === "pending" || job.status === "processing") {
+        setDownloadStatus("Generating report...");
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const statusResponse = await fetch(statusUrl, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!statusResponse.ok) throw new Error(t("reports.downloadError"));
+        job = await statusResponse.json();
+      }
+      if (job.status !== "completed" || !job.downloadUrl) {
+        throw new Error(job.error || t("reports.downloadError"));
+      }
 
-      // Create a temporary anchor element to trigger the browser download
-      // dialogue.  The object URL is revoked immediately after the click so
-      // it does not linger in memory.
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
+      const downloadUrl = new URL(job.downloadUrl, reportUrl);
+      downloadUrl.searchParams.set("format", "csv");
+      downloadFile(downloadUrl.href, fallbackFilename);
+      setDownloadStatus("Report ready; download started.");
     } catch (err) {
-      // Surface an actionable message and ensure no stale loading state remains.
-      setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
+      if (err.name === "AbortError") {
+        setDownloadStatus("Report generation cancelled.");
+      } else {
+        setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
+      }
     } finally {
+      downloadAbortRef.current = null;
       setCsvLoading(false);
     }
+  }
+
+  function cancelCsvDownload() {
+    downloadAbortRef.current?.abort();
   }
 
   const TABLE_COLS = [
@@ -241,10 +272,11 @@ export default function ReportDownload() {
       )}
 
       {loading && !report && (
-        <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <StandaloneEmptyState
-            variant="loading"
-          />
+        <div role="status" aria-live="polite" aria-busy="true" aria-label="Loading..." style={{ marginBottom: "1.5rem" }}>
+          <div className="stat-grid" style={{ marginBottom: "1rem" }}>
+            {[0, 1, 2, 3].map((index) => <StatCard key={index} label=" " value=" " />)}
+          </div>
+          <SkeletonDetailCard rows={5} />
         </div>
       )}
 
@@ -290,6 +322,11 @@ export default function ReportDownload() {
                   </>
                 )}
               </button>
+              {csvLoading && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={cancelCsvDownload}>
+                  Cancel
+                </button>
+              )}
               {reportHistory.length > 0 && (
                 <button
                   onClick={() => setShowHistory(!showHistory)}
@@ -301,6 +338,12 @@ export default function ReportDownload() {
               )}
             </div>
           </div>
+
+          {downloadStatus && (
+            <p role="status" aria-live="polite" aria-busy={csvLoading} style={{ marginTop: "-0.75rem", marginBottom: "1rem", color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+              {downloadStatus}
+            </p>
+          )}
 
           {showHistory && reportHistory.length > 0 && (
             <div className="card" style={{ marginBottom: "1.5rem" }}>
