@@ -411,6 +411,57 @@ jobs:
         if: always() && steps.changes.outputs.run == 'true'
         run: docker compose down -v
 
+  # ── #338: Cross-browser smoke test matrix ───────────────────────────────────
+  # Runs the Playwright smoke test suite against Chromium, Firefox, and WebKit
+  # on every PR to main.  Browser-specific failures are reported per-browser
+  # so the exact browser causing the failure is visible in the CI summary.
+  cross-browser:
+    name: Cross-browser smoke test matrix
+    runs-on: ubuntu-latest
+    # Only run on PRs targeting main (not on feature branch pushes).
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v6
+        with:
+          path: |
+            frontend/node_modules
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - run: npm ci
+      - run: cd frontend && npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Validate cross-browser config and smoke suite structure
+        run: npx jest --testPathPattern=tests/issue-338-cross-browser-smoke-matrix --forceExit
+      - name: Run cross-browser smoke tests (Playwright)
+        env:
+          APP_URL: ${{ vars.STAGING_URL || 'http://localhost:3000' }}
+        run: |
+          # Start the frontend in the background if no external APP_URL is set
+          if [ -z "${{ vars.STAGING_URL }}" ]; then
+            cd frontend && NEXT_PUBLIC_API_URL=http://localhost:5000/api npm run build && npm start &
+            sleep 10
+            cd ..
+          fi
+          npx playwright test --config=playwright.cross-browser.config.js
+        timeout-minutes: 15
+        continue-on-error: false
+      - name: Upload Playwright report (cross-browser)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-cross-browser-report
+          path: reports/cross-browser
+          retention-days: 14
+
   # ── #1389: Required gate ─────────────────────────────────────────────────
   # A single job that every branch-protection rule needs to require. Add this
   # job name ("CI gate") as the sole required status check in GitHub's branch
