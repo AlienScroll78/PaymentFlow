@@ -32,7 +32,7 @@
  * parsing JSX (the project has no @babel/preset-react in Jest config).
  */
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FixedSizeList } from "react-window";
 import { useTranslation } from "react-i18next";
 import DisputeForm from "./DisputeForm";
@@ -117,6 +117,8 @@ function TransactionRow({ index, style, data }) {
     onDisputeOpen,
     onDisputeSuccess,
     onDisputeCancel,
+    activeIndex,
+    onRowFocus,
     t,
   } = data;
 
@@ -138,6 +140,11 @@ function TransactionRow({ index, style, data }) {
     >
       <div
         className="pf-payment-item"
+        role="gridcell"
+        id={`transaction-grid-cell-${index}`}
+        data-grid-cell-index={index}
+        tabIndex={activeIndex === index ? 0 : -1}
+        onFocus={() => onRowFocus(index)}
         style={{
           height: ROW_HEIGHT - 1,
           overflowY: "auto",
@@ -147,13 +154,6 @@ function TransactionRow({ index, style, data }) {
           justifyContent: "flex-start",
           padding: "0.5rem 0.75rem",
         }}
-        tabIndex={canDispute ? 0 : undefined}
-        onKeyDown={canDispute ? (e) => {
-          if ((e.key === "Enter" || e.key === " ") && !alreadyDisputed && !isDisputing) {
-            e.preventDefault();
-            onDisputeOpen(p.txHash);
-          }
-        } : undefined}
         aria-label={t("paymentForm.txRowAria", {
           amount: p.amount,
           asset: p.assetCode || "XLM",
@@ -299,8 +299,52 @@ export default function VirtualTransactionList({
   const [disputingTx, setDisputingTx] = useState(null);
   const [sort, setSort] = useState(DEFAULT_SORT);
   const listRef = useRef(null);
+  const gridRef = useRef(null);
+  const pendingFocusRef = useRef(null);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const sortedPayments = useSortedTransactions(payments || [], sort);
+
+  useEffect(() => {
+    if (pendingFocusRef.current === null) return;
+    const index = pendingFocusRef.current;
+    pendingFocusRef.current = null;
+    gridRef.current
+      ?.querySelector(`[data-grid-cell-index="${index}"]`)
+      ?.focus();
+  }, [activeIndex, sortedPayments]);
+
+  const focusRow = useCallback((index) => {
+    if (sortedPayments.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(index, sortedPayments.length - 1));
+    pendingFocusRef.current = nextIndex;
+    setActiveIndex(nextIndex);
+    listRef.current?.scrollToItem(nextIndex, "smart");
+  }, [sortedPayments.length]);
+
+  const handleGridKeyDown = useCallback((event) => {
+    if (event.target.closest("button, input, select, textarea, a")) {
+      if (event.key !== "Escape") return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusRow(activeIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusRow(activeIndex - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusRow(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      focusRow(sortedPayments.length - 1);
+    } else if (event.key === "Escape" && disputingTx) {
+      event.preventDefault();
+      setDisputingTx(null);
+      const index = sortedPayments.findIndex((payment) => payment.txHash === disputingTx);
+      focusRow(index);
+    }
+  }, [activeIndex, disputingTx, focusRow, sortedPayments]);
 
   const handleSort = useCallback((column) => {
     setSort((prev) => ({
@@ -333,10 +377,13 @@ export default function VirtualTransactionList({
     onDisputeOpen: handleDisputeOpen,
     onDisputeSuccess: handleDisputeSuccess,
     onDisputeCancel: handleDisputeCancel,
+    activeIndex,
+    onRowFocus: setActiveIndex,
     t,
   }), [
     sortedPayments, disputedTxs, disputingTx, refunds, studentId,
-    handleDisputeOpen, handleDisputeSuccess, handleDisputeCancel, t,
+    handleDisputeOpen, handleDisputeSuccess, handleDisputeCancel,
+    activeIndex, t,
   ]);
 
   const rowCount = paymentsLoading
@@ -372,10 +419,13 @@ export default function VirtualTransactionList({
 
       {/* Virtualised list */}
       <div
-        role="table"
+        ref={gridRef}
+        role="grid"
+        aria-colcount={1}
         aria-label={t("paymentForm.paymentHistory")}
         aria-rowcount={rowCount + 1} // +1 for the header/sort row
         aria-busy={paymentsLoading}
+        onKeyDown={handleGridKeyDown}
       >
         {paymentsLoading ? (
           <FixedSizeList
@@ -385,6 +435,7 @@ export default function VirtualTransactionList({
             itemSize={ROW_HEIGHT}
             width="100%"
             style={{ outline: "none" }}
+            itemKey={(index) => `loading-${index}`}
           >
             {SkeletonRow}
           </FixedSizeList>
@@ -401,7 +452,8 @@ export default function VirtualTransactionList({
             itemData={itemData}
             width="100%"
             style={{ outline: "none" }}
-            overscanCount={3}
+            overscanCount={10}
+            itemKey={(index, data) => data.transactions[index]?.txHash || data.transactions[index]?._id || index}
           >
             {TransactionRow}
           </FixedSizeList>
