@@ -7,6 +7,7 @@ import { getStudent, getPaymentInstructions, getStudentPayments, getStudentBalan
 import DisputeForm from "./DisputeForm";
 import VirtualTransactionList from "./VirtualTransactionList";
 import { useSessionGuard } from "../hooks/useSessionGuard";
+import { useSessionExpiryWarning } from "../hooks/useSessionExpiryWarning";
 import PaymentConfirmationStep from "./PaymentConfirmationStep";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconCopy, IconCheck, IconAlertTriangle, IconSearch, IconDownload } from "./Icons";
@@ -53,13 +54,16 @@ function InfoRow({ label, children }) {
 }
 
 /**
- * @param {{ initialStudentId?: string, isOnline?: boolean, wasOffline?: boolean }} props
+ * @param {{ initialStudentId?: string, isOnline?: boolean, wasOffline?: boolean, tokenExp?: number|null }} props
  *   isOnline  — when false, disables the student lookup / payment submit button
  *               to prevent duplicate submissions while the device is offline.
  *   wasOffline — when true (linger window after reconnect), shows a stale-state
  *               warning so the parent can offer a refresh before re-submitting.
+ *   tokenExp  — Unix timestamp (seconds) of the current JWT expiry.  When
+ *               provided, a session-expiry warning toast is shown 5 minutes
+ *               before the token expires (Issue #253).
  */
-export default function PaymentForm({ initialStudentId = "", isOnline = true, wasOffline = false }) {
+export default function PaymentForm({ initialStudentId = "", isOnline = true, wasOffline = false, tokenExp = null }) {
   const { t } = useTranslation();
   const [studentId, setStudentId]             = useState(initialStudentId);
   const [shareCopied, setShareCopied]         = useState(false);
@@ -81,6 +85,11 @@ export default function PaymentForm({ initialStudentId = "", isOnline = true, wa
   // #1118 — wallets that cannot send free-text memos can switch the QR code to
   // MEMO_ID or MEMO_HASH; all three decode back to the same payment reference.
   const [memoType, setMemoType]               = useState("MEMO_TEXT");
+  // #253 — draft restored banner: shown once after a session-expiry re-login
+  // restores the student ID from sessionStorage.
+  const [showDraftRestoredBanner, setShowDraftRestoredBanner] = useState(false);
+  // #253 — session expiry warning toast: shown 5 minutes before token expiry.
+  const [showExpiryWarning, setShowExpiryWarning] = useState(false);
   const errorRef    = useRef(null);
   const debounceRef = useRef(null);
   const qrWrapperRef = useRef(null);
@@ -91,8 +100,15 @@ export default function PaymentForm({ initialStudentId = "", isOnline = true, wa
   // Issue #5 — session guard: save the non-sensitive student ID draft when the
   // session expires so it can be restored after re-authentication.
   // Sensitive fields (walletAddress, memo, txHash, amounts) are never persisted.
-  const { saveDraft, restoreDraft } = useSessionGuard({
+  const { saveDraft, restoreDraft, clearDraft: clearSavedDraft } = useSessionGuard({
     onSessionExpired: () => saveDraft({ studentId }),
+  });
+
+  // Issue #253 — session expiry warning: fire a toast 5 minutes before the
+  // JWT expires so the user has time to finish or save their work.
+  useSessionExpiryWarning({
+    tokenExp,
+    onWarning: () => setShowExpiryWarning(true),
   });
 
   // Restore a safe draft (studentId only) left from a previous session expiry.
@@ -101,8 +117,18 @@ export default function PaymentForm({ initialStudentId = "", isOnline = true, wa
     const draft = restoreDraft();
     if (draft?.studentId && !initialStudentId?.trim()) {
       setStudentId(draft.studentId);
+      // Show the "draft restored" banner so the user knows their data came back.
+      setShowDraftRestoredBanner(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Issue #253 — clear the saved draft once the user has confirmed payment
+  // details (i.e. the data has been successfully used and is no longer needed).
+  useEffect(() => {
+    if (confirmed && student) {
+      clearSavedDraft();
+    }
+  }, [confirmed, student, clearSavedDraft]);
 
   function handleStudentIdChange(e) {
     const value = e.target.value;
@@ -268,6 +294,73 @@ export default function PaymentForm({ initialStudentId = "", isOnline = true, wa
   return (
     <>
       
+
+      {/* #253 — Session expiry warning toast: shown 5 minutes before the JWT
+          expires. The user can dismiss it; the actual expiry is handled by
+          the axios interceptor and useSessionGuard. */}
+      {showExpiryWarning && (
+        <div
+          role="alert"
+          className="alert alert-warning"
+          style={{
+            marginBottom: "0.75rem",
+            fontSize: "0.8125rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <IconAlertTriangle size={14} />
+            {t("sessionExpiry.warningToast", { minutes: 5 })}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            style={{ flexShrink: 0 }}
+            aria-label={t("actions.hide")}
+            onClick={() => setShowExpiryWarning(false)}
+          >
+            {t("actions.hide")}
+          </button>
+        </div>
+      )}
+
+      {/* #253 — Draft restored banner: shown once after re-authentication
+          restores the student ID that was saved before the session expired. */}
+      {showDraftRestoredBanner && (
+        <div
+          role="status"
+          className="alert alert-info"
+          style={{
+            marginBottom: "0.75rem",
+            fontSize: "0.8125rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <IconCheck size={14} />
+            {t("sessionExpiry.draftRestored")}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            style={{ flexShrink: 0 }}
+            aria-label={t("sessionExpiry.discardDraft")}
+            onClick={() => {
+              clearSavedDraft();
+              setStudentId("");
+              setShowDraftRestoredBanner(false);
+            }}
+          >
+            {t("sessionExpiry.discardDraft")}
+          </button>
+        </div>
+      )}
 
       <div className="card pf-wrap">
         <div className="card-header">

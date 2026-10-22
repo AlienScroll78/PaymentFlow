@@ -1,5 +1,14 @@
 /** @type {import('next').NextConfig} */
 
+// Validate required public environment variables at build/startup time.
+try {
+  const { validateEnv } = require('./src/config/envValidation');
+  validateEnv();
+} catch (e) {
+  if (process.env.NODE_ENV === 'production') throw e;
+  console.warn('[next.config.js] Environment validation warning:', e.message);
+}
+
 // External-origin allow-lists are defined in a single shared module so that
 // both this file (runtime policy) and tests/csp.test.js (assertions) stay in
 // sync automatically. To add a new origin, edit only cspSources.js.

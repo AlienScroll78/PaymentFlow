@@ -37,6 +37,7 @@ import {
   IconDollarSign,
   IconChevronLeft,
 } from "./Icons";
+import PaymentStatusTimeline from "./PaymentStatusTimeline";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -187,7 +188,7 @@ function CopyButton({ value, label }) {
 /**
  * @param {{ transaction: object, onClose: function, onDisputeRaised?: function }} props
  */
-export default function TransactionDetail({ transaction, onClose, onDisputeRaised }) {
+export default function TransactionDetail({ transaction, onClose, onDisputeRaised, payments = [] }) {
   const { t } = useTranslation();
   const dialogRef = useRef(null);
   const closeRef  = useRef(null);
@@ -495,6 +496,9 @@ export default function TransactionDetail({ transaction, onClose, onDisputeRaise
               </div>
             )}
           </div>
+
+          {/* ── Payment status timeline ── */}
+          <PaymentStatusTimeline payments={payments} currentStatus={tx.status} compact />
 
           {/* ── Body ── */}
           <div className="txd-body" role="region" aria-label={t("transactionDetail.detailsAria")}>

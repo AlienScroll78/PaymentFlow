@@ -13,6 +13,7 @@ import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 import { useOptimisticAction } from "../hooks/useOptimisticAction";
+import { useAbortController } from "../hooks/useAbortController";
 
 const RULE_TYPES = [
   { value: "discount_percentage", labelKey: "feeAdjustments.ruleTypeDiscountPct" },
@@ -91,6 +92,9 @@ export default function FeeAdjustments() {
   const [deleteError, setDeleteError]       = useState(null);
   const [deleting, setDeleting]             = useState(false);
 
+  // Issue #254 — abort in-flight fee-adjustment requests when the component unmounts.
+  const { signal } = useAbortController();
+
   // Optimistic update for rule edits (Issue #8).
   // Editing a rule is reversible (we can roll back the table row) and
   // idempotent (re-submitting the same payload has the same effect).
@@ -114,11 +118,15 @@ export default function FeeAdjustments() {
     if (!schoolId) return; // Don't load until we have the authenticated school context
     setLoading(true);
     setError(null);
-    getFeeAdjustmentRules(schoolId)
+    getFeeAdjustmentRules(schoolId, { signal })
       .then(({ data }) => setRules(data))
-      .catch(() => setError(t("feeAdjustments.failedToLoad")))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError(t("feeAdjustments.failedToLoad"));
+      })
       .finally(() => setLoading(false));
-  }, [schoolId, t]);
+  }, [schoolId, t, signal]);
 
   useEffect(() => { load(); }, [load]);
 

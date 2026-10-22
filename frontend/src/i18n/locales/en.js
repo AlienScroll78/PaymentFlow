@@ -16,6 +16,7 @@ const en = {
     auditLogs: "Audit Logs",
     disputes: "Disputes",
     webhooks: "Webhooks",
+  deadLetter: "Dead-Letter Queue",
     sidebarAria: "Sidebar navigation",
     section: "Navigation",
     language: "Language",
@@ -304,6 +305,7 @@ const en = {
     verifying: "Verifying…",
     submit: "Verify Transaction",
     verificationFailed: "Verification failed. Check the transaction hash and try again.",
+    alreadyCreated: "This payment has already been created. No duplicate was recorded.",
     checkNetworkStatus: "Check Stellar Network Status ↗",
     transactionFound: "Transaction Found",
     amount: "Amount",
@@ -793,6 +795,7 @@ const en = {
 
   errorBoundary: {
     title: "Something went wrong",
+    sectionTitle: "Something went wrong in {{section}}",
     body: "An unexpected error occurred. You can try reloading the page or go back to safety.",
     reload: "Reload page",
     goBack: "Go back",
@@ -937,6 +940,12 @@ const en = {
     futureDatesWarning: "Future dates selected",
     applyRange: "Apply",
     customRange: "Custom range",
+  },
+
+  sessionExpiry: {
+    warningToast: "Your session will expire in {{minutes}} minutes. Please save your work.",
+    draftRestored: "Your draft was restored from before your session expired.",
+    discardDraft: "Discard",
   },
 };
 

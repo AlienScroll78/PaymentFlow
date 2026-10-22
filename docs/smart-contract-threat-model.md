@@ -1,5 +1,10 @@
 # Smart-Contract Threat Model
 
+> **Issue:** [#301 — Create comprehensive smart contract threat model](https://github.com/onlyonee1/PaymentFlow/issues/301)
+> **Status:** Active — updated as new threats are identified
+> **Author:** Platform Engineering
+> **Last updated:** 2026-10-20
+
 This document applies a trust-boundary analysis to PaymentFlow's Stellar on-chain
 integration and the planned Soroban escrow contract. It supplements the existing
 API-level threat model (`docs/threat-model.md`) with threats that are specific to
@@ -30,6 +35,14 @@ smart-contract and blockchain primitives.
   - [SC-15 Finality State Machine Regression](#sc-15-finality-state-machine-regression)
 - [Risk Matrix](#risk-matrix)
 - [High-Risk Items to Test Mapping](#high-risk-items-to-test-mapping)
+- [Incident Response Playbooks](#incident-response-playbooks)
+  - [PLAY-01 Signer Key Compromise Detected](#play-01-signer-key-compromise-detected)
+  - [PLAY-02 Smart Contract Authorization Exploit](#play-02-smart-contract-authorization-exploit)
+  - [PLAY-03 Mass Memo Collision or Spoofing Campaign](#play-03-mass-memo-collision-or-spoofing-campaign)
+  - [PLAY-04 Horizon Outage or Sustained Sync Failure](#play-04-horizon-outage-or-sustained-sync-failure)
+  - [PLAY-05 Escrow Funds Frozen (Dispute Dead-Lock)](#play-05-escrow-funds-frozen-dispute-dead-lock)
+  - [PLAY-06 Contract Upgrade Gone Wrong](#play-06-contract-upgrade-gone-wrong)
+  - [PLAY-07 USDC Issuer Address Stale or Spoofed](#play-07-usdc-issuer-address-stale-or-spoofed)
 - [Residual Risk Summary](#residual-risk-summary)
 
 ---
@@ -386,6 +399,14 @@ threshold: 5 minutes) would detect this within one poll cycle.
 **Residual risk owner:** Platform Operator (must track Stellar SDK changelogs and
 Horizon API deprecation notices).
 
+**Upgrade and pause controls (Issue #61):** Explicit, least-privilege upgrade and
+pause controls are now defined in `backend/src/services/contractUpgradeControls.js`:
+- Only OWNER may propose or execute an upgrade; OPERATOR may pause but not unpause.
+- Upgrades require a multi-sig quorum (`UPGRADE_QUORUM = 2`) to prevent single-key unilateral deployment.
+- All upgrade proposals, approvals, and rollbacks are recorded for audit purposes.
+- Recovery procedures for upgrade failures and key loss are documented in
+  `docs/runbooks/contract-upgrade-failure.md`.
+
 ---
 
 ### SC-09 Soroban Contract Authorization Bypass
@@ -619,6 +640,367 @@ Low (monitor and review annually).
 | SC-13 (Source Validation) | `tests/sourceValidationRules.test.js` |
 | SC-02 (Replay) | `tests/payment-idempotency.test.js`, `tests/transactionAtomicity.test.js` |
 | SC-06 (Finality Machine) | `backend/tests/paymentConfirmationStateMachine.test.js`, `backend/tests/confirmationStateRepollAndCrossSchoolCollision.test.js` |
+
+---
+
+---
+
+## Incident Response Playbooks
+
+These playbooks answer the question *"what do we do if X happens?"* for each
+high-impact threat. Each playbook follows the same structure:
+
+1. **Detection** — how we know the incident is happening
+2. **Immediate containment** — actions taken within the first 15 minutes
+3. **Investigation** — evidence gathering and scope determination
+4. **Remediation** — permanent fix or workaround
+5. **Post-incident** — review and hardening
+
+Severity definitions:
+
+| Severity | Definition |
+|---|---|
+| **P0 — Critical** | Funds at risk or already lost; student records corrupted |
+| **P1 — High** | Payment processing blocked for >15 minutes; data integrity risk |
+| **P2 — Medium** | Degraded functionality; no immediate fund or data risk |
+
+---
+
+### PLAY-01 Signer Key Compromise Detected
+
+**Relates to:** SC-01
+**Severity:** P0 — funds at risk
+
+**Detection signals:**
+- Unexpected outgoing transactions on the school wallet detected by Horizon monitoring
+- Secret-scan CI alert fires on a pushed commit or secret management alert
+- AWS Secrets Manager access log shows unexpected access pattern
+- Admin receives Stellar network confirmation for a transaction they did not initiate
+
+**Immediate containment (< 15 min):**
+1. **Freeze the affected school account** — invoke the admin API to set the school
+   to `status: 'suspended'` to stop new PaymentIntent creation.
+   ```bash
+   curl -X PUT https://api.paymentflow.io/api/schools/<schoolId> \
+     -H "Authorization: Bearer $ADMIN_JWT" \
+     -d '{"status": "suspended"}'
+   ```
+2. **Rotate the signer key immediately** using the staged rotation script:
+   ```bash
+   node scripts/rotate-signer-key-staged.js --school <schoolId> --force
+   ```
+3. **Revoke the compromised key** from all signers on the Stellar account using
+   `setOptions` to remove it from the multisig threshold.
+4. **Alert the Platform Security team** via the incident channel. Escalate to the
+   school admin within 30 minutes.
+
+**Investigation:**
+- Export Horizon transaction history for the school wallet from the first suspicious
+  timestamp: `GET /accounts/<address>/transactions?order=asc&cursor=<ledger>`.
+- Identify all outgoing transactions not initiated by the system (cross-reference
+  Payment records in MongoDB — any Horizon transaction with no matching `txHash`
+  in the database is unauthorized).
+- Check `AuditLog` for any signer key access or admin actions in the 24 hours
+  preceding the first unauthorized transaction.
+- Review AWS CloudTrail / Secrets Manager access logs for the compromised key's secret.
+
+**Remediation:**
+- Generate a new Stellar keypair; fund it with the minimum XLM reserve.
+- Update the school's `stellarWalletAddress` if the account itself is abandoned.
+- Re-enable the school account once the new key is confirmed working on testnet.
+- File a post-mortem covering how the key was exfiltrated.
+
+**Post-incident hardening:**
+- Enable hardware-key (HSM) signing for signer keys in production.
+- Add a Horizon outgoing-transaction alert rule to the monitoring stack.
+- Review `SIGNER_KEY_SOURCE` configuration — prefer AWS Secrets Manager over
+  environment variables.
+
+---
+
+### PLAY-02 Smart Contract Authorization Exploit
+
+**Relates to:** SC-09
+**Severity:** P0 — funds at risk (on-chain)
+
+**Detection signals:**
+- `Released` event observed on-chain for an escrow where the backend did NOT call
+  `release()` (cross-reference `PaymentIntent.escrowState` in MongoDB).
+- Unexpected `Resolved` event observed where the arbiter address does not match
+  the platform's known arbiter account.
+- Monitoring alert: on-chain escrow count decreasing without corresponding `Released`
+  events recorded in Payment collection.
+
+**Immediate containment (< 15 min):**
+1. **Pause all new deposits** — set a contract-level pause flag if the contract
+   implements the pause control from `contractUpgradeControls.js`. Otherwise,
+   stop the backend's escrow invocation path:
+   ```bash
+   # Set env flag to disable new escrow deposit calls
+   curl -X POST https://api.paymentflow.io/api/admin/log-level \
+     -H "Authorization: Bearer $ADMIN_JWT" \
+     -d '{"level": "debug"}'
+   # Then manually disable escrow route in the running instance
+   ```
+2. **Freeze affected escrows** — identify all escrows currently in `FUNDED` or
+   `DISPUTED` state via `getStatus()` calls and record their `escrow_id` list.
+3. **Alert the arbiter key holder** to revoke or freeze arbiter signing capability.
+4. **Do not submit any new contract transactions** until the exploit is understood.
+
+**Investigation:**
+- Fetch the full transaction XDR for the exploit transaction from Horizon.
+- Decode the invocation payload to determine which function was called and by whom.
+- Determine whether the exploit is:
+  - An auth bypass in the contract code (critical — all escrows at risk).
+  - A compromised arbiter or beneficiary key (scope limited to that key's escrows).
+  - A Soroban protocol-level vulnerability (escalate to Stellar Development Foundation).
+- Review all `Released` and `Resolved` events from the contract address from deployment
+  onward; cross-reference each against Payment records in MongoDB.
+
+**Remediation:**
+- If a contract bug: deploy a patched contract (requires `contractUpgradeControls.js`
+  quorum). Migrate any funds still held in the buggy contract via the arbiter's
+  `cancel()` function before the old contract is deprecated.
+- If a key compromise: rotate the affected key and re-examine all operations signed
+  with it.
+- Update all affected `PaymentIntent` and `Payment` records to reflect actual
+  on-chain state, flagging records with discrepancies for manual school admin review.
+
+**Post-incident hardening:**
+- Require a security audit of the contract code before each deployment.
+- Add contract event monitoring that alerts within 60 seconds of any unexpected
+  `Released` or `Resolved` event.
+- Move arbiter account to a hardware multi-sig wallet (2-of-3 threshold).
+
+---
+
+### PLAY-03 Mass Memo Collision or Spoofing Campaign
+
+**Relates to:** SC-03, SC-13
+**Severity:** P1 — payment integrity risk
+
+**Detection signals:**
+- Spike in `isSuspicious: true` payments in the `Payment` collection.
+- Alert: `detectMemoCollision` flag rate > 5 per minute for any school.
+- Admin reports unexpected `feePaid` status changes or students showing payments
+  they did not make.
+- Velocity alert: >10 unique sender addresses for the same memo within 1 hour.
+
+**Immediate containment (< 15 min):**
+1. **Enable strict source validation** for the affected school — add a deny-all
+   rule except for known parent wallets:
+   ```bash
+   POST /api/source-validation-rules
+   { "schoolId": "<id>", "type": "denylist", "pattern": "*", "priority": 1 }
+   ```
+2. **Suspend auto-approval** of incoming payments for the affected school — set
+   `requireManualReview: true` in the school settings model so no payment
+   automatically updates `feePaid`.
+3. **Alert the school admin** to review the suspicious payment queue immediately.
+
+**Investigation:**
+- Query the `Payment` collection for `isSuspicious: true` in the last 24 hours,
+  grouped by `memo`.
+- For each affected memo/student, determine whether:
+  - The legitimate parent's payment was already recorded and `feePaid` is correct.
+  - A fraudulent payment has incorrectly set `feePaid = true`.
+- Identify the sender addresses involved in the collision and check if they are
+  related accounts (same keypair family) or a distributed attack.
+
+**Remediation:**
+- For any student where a fraudulent payment set `feePaid = true` incorrectly:
+  1. Open a dispute record manually.
+  2. Set `feePaid = false` via admin override.
+  3. Contact the parent to resubmit via a newly created PaymentIntent with a
+     rotated memo (appended nonce).
+- Add attacker wallet addresses to the school's denylist source validation rules.
+
+**Post-incident hardening:**
+- Lower the collision detection window from 24 hours to 4 hours for high-risk schools.
+- Add a school-level setting to require source wallet pre-registration before any
+  payment is accepted.
+
+---
+
+### PLAY-04 Horizon Outage or Sustained Sync Failure
+
+**Relates to:** SC-07, SC-08
+**Severity:** P1 — payment processing delayed
+
+**Detection signals:**
+- Health check at `/health` returns `"status": "degraded"`.
+- `lastSyncAt` staleness alert fires (>5 minutes without a successful sync).
+- Prometheus alert: `payment_sync_lag_seconds > 300`.
+- Log spike of `StellarNetworkError` or `503` responses from Horizon.
+
+**Immediate containment (< 15 min):**
+1. **Check Horizon status page** — `https://status.stellar.org` — to determine if
+   the outage is network-wide or isolated to one Horizon provider.
+2. **Verify failover is active** — check that `horizonFailoverClient` has switched
+   to the secondary Horizon URL. Inspect the log for `Switching to fallback Horizon`.
+3. **Notify affected school admins** that payment confirmation may be delayed.
+   Payments already submitted on-chain are safe; they will be picked up on recovery.
+4. **Do not restart the backend** unless the circuit breaker is stuck open — a
+   restart resets in-flight retry state.
+
+**Investigation:**
+- Check `retry queue depth` via `GET /api/admin/retry-queue`.
+- Determine the oldest unprocessed `PaymentIntent` to calculate the blast radius.
+- Check whether the `horizonPollBudget` throttle is contributing to the lag.
+
+**Remediation:**
+- If Horizon is network-wide down: wait for Stellar network recovery. All pending
+  intents will be processed on the next successful poll.
+- If only the primary Horizon URL is down: update `HORIZON_URL` env var to point
+  to the secondary permanently and redeploy.
+- If the circuit breaker is permanently open: reset it via the admin API or by
+  restarting the polling service worker.
+- After recovery, run a manual sync to catch up:
+  ```bash
+  POST /api/payments/sync
+  ```
+
+**Post-incident hardening:**
+- Add a third Horizon URL to the failover list.
+- Configure a PagerDuty / Opsgenie integration on the `lastSyncAt` staleness alert.
+
+---
+
+### PLAY-05 Escrow Funds Frozen (Dispute Dead-Lock)
+
+**Relates to:** SC-09 (arbiter availability), timeout design in escrow requirements
+**Severity:** P1 — funds inaccessible (not lost, but frozen)
+
+**Detection signals:**
+- `DisputeModel` records with `status: 'open'` older than the configured
+  `DISPUTE_RESOLUTION_SLA` (default: 5 business days) with no arbiter action.
+- Parent or school admin raises a support ticket reporting funds are stuck.
+- Backend alert: escrow in `DISPUTED` state with `created_at` older than 7 days.
+
+**Immediate containment (< 15 min):**
+1. **Identify the frozen escrow** — query `DisputeModel` for records where
+   `status: 'open'` and `createdAt < now - SLA_DAYS`.
+2. **Confirm the arbiter account is accessible** — attempt a test invocation
+   (e.g. `getStatus()`) using the arbiter key to verify it is not compromised or
+   lost.
+3. **Alert the dispute resolution team** with the escrow ID and both parties'
+   contact information.
+
+**Investigation:**
+- Retrieve the full dispute record including off-chain evidence from `DisputeModel.evidence`.
+- Fetch the on-chain escrow state via `getStatus(escrow_id)` to confirm current state.
+- Determine whether the deadlock is:
+  - **Arbiter key inaccessible** — requires emergency key recovery procedure.
+  - **Pending evidence** — arbiter is waiting for documentation from one party.
+  - **Process failure** — arbiter was not notified of the dispute.
+
+**Remediation:**
+- If evidence is complete: arbiter calls `resolveDispute(escrow_id, decision)`.
+- If arbiter key is inaccessible: invoke the emergency arbiter recovery procedure
+  (see `docs/runbooks/contract-upgrade-failure.md`) to transfer arbiter role to a
+  backup key via contract upgrade.
+- If the escrow's `timeout_ledger` has already passed (FUNDED state): the payer may
+  call `claimExpired()` independently to recover funds without arbiter involvement.
+  Note: this is NOT available in DISPUTED state — the dispute must be resolved first.
+
+**Post-incident hardening:**
+- Implement automated escalation: after 3 business days without arbiter action,
+  auto-notify a secondary arbiter.
+- Store the arbiter key in a geographically distributed multi-sig (2-of-3) so no
+  single point of unavailability can freeze funds.
+- Add an automatic reminder webhook to the dispute resolution team when a dispute
+  ages past 48 hours.
+
+---
+
+### PLAY-06 Contract Upgrade Gone Wrong
+
+**Relates to:** SC-08
+**Severity:** P1 — payment processing blocked
+
+**Detection signals:**
+- `POST /api/admin/contract-upgrade` returns a non-success status or times out.
+- Backend logs show `ContractUpgradeError` or unexpected contract invocation failures
+  after a deploy.
+- `getStatus()` calls on existing escrows start returning unexpected errors.
+- Health check degrades immediately after a deployment.
+
+**Immediate containment (< 15 min):**
+1. **Halt the upgrade** — if in the proposal phase (not yet executed), cancel the
+   upgrade proposal via the `contractUpgradeControls` API.
+2. **Roll back to the previous contract WASM hash** — the `contractUpgradeControls`
+   service records the prior hash. Initiate rollback:
+   ```bash
+   node scripts/rollback-contract.js --to <previous_wasm_hash>
+   ```
+3. **Freeze new deposits** to the contract address while the rollback is in progress.
+4. **Check all existing escrows** by enumerating `PaymentIntent.escrowId` values in
+   `FUNDED` or `DISPUTED` state and calling `getStatus()` on each to verify they
+   are unaffected.
+
+**Investigation:**
+- Compare the deployed WASM hash against the expected hash from the build artifact.
+- Check whether the upgrade changed any storage key layout — a layout change can
+  corrupt persistent storage of existing escrows.
+- Review `contractUpgradeControls` audit log for all signers who approved the upgrade.
+
+**Remediation:**
+- Once rollback is confirmed successful, re-enable deposits.
+- If storage corruption affected existing escrows: manually resolve each affected
+  escrow via the arbiter (`cancel()` to return funds to payers), then ask payers to
+  re-deposit once the contract is patched.
+- Perform a full regression test against testnet before re-attempting the upgrade.
+
+**Post-incident hardening:**
+- Require a testnet canary deployment for 24 hours before mainnet upgrade execution.
+- Enforce WASM hash signing (two independent engineers must sign off on the hash).
+- Reference: `docs/runbooks/contract-upgrade-failure.md`.
+
+---
+
+### PLAY-07 USDC Issuer Address Stale or Spoofed
+
+**Relates to:** SC-05
+**Severity:** P1 — payments silently rejected or fraudulently accepted
+
+**This playbook covers two opposite failure modes:**
+
+**Mode A — Stale issuer config (legitimate USDC rejected):**
+
+Detection signals:
+- School admins report USDC payments are not being recorded despite confirmed
+  on-chain transactions.
+- Prometheus alert: `valid_payments_recorded / horizon_payment_events_observed` ratio
+  drops below 0.8 for USDC asset type.
+
+Immediate containment:
+1. Check Circle's official Stellar USDC issuer address for the affected network
+   (mainnet: `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`,
+   testnet: `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`).
+2. Compare against `USDC_ISSUER` in the current deployment's environment config.
+3. If they differ, update `USDC_ISSUER` and redeploy.
+4. After redeployment, manually re-sync the affected time window to pick up the
+   missed USDC payments: `POST /api/payments/sync`.
+
+**Mode B — Fake USDC token accepted (active exploit):**
+
+Detection signals:
+- Payments recorded with `asset_issuer` ≠ Circle's official issuer address.
+- `feePaid` set to `true` for payments with an unofficial USDC token.
+- School admin reports revenue shortfall — funds received are worthless tokens.
+
+Immediate containment:
+1. Immediately remove the rogue issuer from the accepted assets list in `stellarConfig.js`
+   and redeploy.
+2. Query the `Payment` collection for records where `asset.issuer` ≠ the official
+   USDC issuer and `asset.code === 'USDC'`.
+3. For each affected payment: set `feePaid = false`, create a dispute record, and
+   notify the school admin.
+
+Post-incident hardening for both modes:
+- Add a startup check that logs a warning if `USDC_ISSUER` does not match the
+  hardcoded Circle address for the active network.
+- Subscribe to Circle's official Stellar announcements for issuer change notices.
 
 ---
 
