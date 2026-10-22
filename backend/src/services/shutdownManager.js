@@ -19,6 +19,11 @@ let shutdownStarted = false;
 
 function setReady(value) {
   ready = value;
+  // Setting ready to false marks the start of shutdown — flip the flag so
+  // isShutdownInProgress() returns true and the duplicate-signal guard works.
+  if (!value) {
+    shutdownStarted = true;
+  }
   logger.info(`Readiness set to ${value ? 'ready' : 'not_ready'}`);
 }
 
@@ -95,6 +100,14 @@ async function closeQueues() {
     { name: 'bullMQRetryQueue', fn: async () => {
       const retryQueue = require('../services/bullMQRetryService');
       if (retryQueue.shutdownQueue) await retryQueue.shutdownQueue();
+    }},
+    { name: 'reportQueue', fn: async () => {
+      const reportQueue = require('./reportQueueService');
+      if (reportQueue.stopWorker) await reportQueue.stopWorker();
+    }},
+    { name: 'genericDeadLetterQueues', fn: async () => {
+      const deadLetterQueue = require('../queue/deadLetterQueue');
+      if (deadLetterQueue.closeDeadLetterQueues) await deadLetterQueue.closeDeadLetterQueues();
     }},
   ];
 
