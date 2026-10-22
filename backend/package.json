@@ -13,7 +13,7 @@
     "seed": "node ../scripts/seed-test-data.js",
     "create-wallet": "node ../scripts/create-school-wallet.js",
     "lint": "eslint src/ tests/ scripts/",
-    "test": "jest --roots=<rootDir>/tests --forceExit"
+    "test": "jest --roots=./tests --forceExit"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1121.0",

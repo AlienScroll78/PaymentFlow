@@ -54,6 +54,9 @@ export function useAdminAuth() {
   // #1218 — surfaces a recoverable auth-me failure so consuming pages can
   // render a "Retry" affordance instead of silently breaking.
   const [authMeError, setAuthMeError] = useState(false);
+  // #253 — expose the JWT expiry timestamp so components can schedule a
+  // session-expiry warning toast before the token expires.
+  const [tokenExp, setTokenExp] = useState(null);
 
   // Tracks whether the component is still mounted so async callbacks don't
   // update state after unmount.
@@ -72,6 +75,9 @@ export function useAdminAuth() {
     setSchoolId(data.schoolId || null);
     setUserId(data.userId || null);
     setAuthMeError(false);
+    // #253 — store the JWT expiry claim so components can schedule a
+    // session-expiry warning toast before the access token expires.
+    setTokenExp(typeof data.exp === 'number' ? data.exp : null);
     if (typeof window !== 'undefined') {
       if (data.schoolId) localStorage.setItem('schoolId', data.schoolId);
       if (data.userId)   localStorage.setItem('userId',   data.userId);
@@ -142,6 +148,7 @@ export function useAdminAuth() {
     setSchoolId(null);
     setUserId(null);
     setAuthMeError(false);
+    setTokenExp(null);
     // Clear school context from storage
     if (typeof window !== 'undefined') {
       localStorage.removeItem('schoolId');
@@ -150,5 +157,5 @@ export function useAdminAuth() {
     router.push('/login');
   }, [router]);
 
-  return { isAdmin, checked, login, logout, schoolId, userId, authMeError, retryAuth };
+  return { isAdmin, checked, login, logout, schoolId, userId, authMeError, retryAuth, tokenExp };
 }

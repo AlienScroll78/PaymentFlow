@@ -39,10 +39,13 @@ const webhookEndpointRoutes = require('./routes/webhookEndpointRoutes');
 const webhookDeliveryRoutes = require('./routes/webhookDeliveryRoutes');
 const paymentPlanRoutes = require('./routes/paymentPlanRoutes');
 const auditRoutes = require('./routes/auditRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const cspReportRoutes = require('./routes/cspReportRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
 const { registerPaymentSavedSubscribers } = require('./services/paymentSavedSubscribers');
+const { registerNotificationSubscribers } = require('./services/notificationCreationSubscriber');
 const { startPolling, stopPolling } = require('./services/transactionPollingService');
 const retrySelector = require('./services/retryServiceSelector');
 const { startConsistencyScheduler, stopConsistencyScheduler } = require('./services/consistencyScheduler');
@@ -65,6 +68,7 @@ const bullMQRetryService = require('./services/bullMQRetryService');
 const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
+const { correlationIdMiddleware } = require('./middleware/correlationId');
 const { createConcurrentRequestMiddleware } = require('./middleware/concurrentRequestHandler');
 const { requireAdminAuth } = require('./middleware/auth');
 const { jsonDepthGuard, deduplicateQueryParams } = require('./middleware/sanitizeRequest');
@@ -107,7 +111,8 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key', 'X-Correlation-ID'],
+  exposedHeaders: ['X-Correlation-ID'],
   credentials: true,
 }));
 app.use(cookieParser());
@@ -132,6 +137,9 @@ app.use(express.json({
     req.rawBody = buf.toString('utf8');
   },
 }));
+// Correlation ID must be resolved before requestLogger so the logger uses the
+// same ID that will be reflected in the response header.
+app.use(correlationIdMiddleware);
 app.use(requestLogger());
 
 // ── Cache-Control: no-store on auth and sensitive data routes ─────────────────
@@ -183,12 +191,14 @@ app.use('/api/fee-adjustments', feeAdjustmentRoutes);
 app.use('/api/email-deliveries', emailDeliveryRoutes);
 app.use('/api/email-provider-webhook', emailProviderWebhookRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/emergency', require('./routes/emergencyRoutes'));
 app.use('/api/auth', authRoutes);
 app.use('/api/webhook-endpoints', webhookEndpointRoutes);
 app.use('/api/webhook-deliveries', webhookDeliveryRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/payment-plans', paymentPlanRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/csp-report', cspReportRoutes);
@@ -388,6 +398,7 @@ async function shutdown(signal) {
     return;
   }
 
+  const shutdownStartTime = Date.now();
   logger.info(`Received ${signal} signal — starting graceful shutdown`);
 
   setReady(false);
@@ -395,30 +406,58 @@ async function shutdown(signal) {
   const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 30_000;
 
   const forceExitTimer = setTimeout(() => {
-    logger.error(`Forced exit after ${SHUTDOWN_TIMEOUT_MS}ms shutdown timeout`);
+    logger.error('Forced exit: shutdown deadline exceeded', {
+      reason: 'shutdown_timeout',
+      signal,
+      shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+      elapsedMs: Date.now() - shutdownStartTime,
+    });
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
   forceExitTimer.unref();
 
+  async function runStep(stepName, fn) {
+    const t0 = Date.now();
+    logger.info(`Shutdown step starting: ${stepName}`);
+    try {
+      await fn();
+      const durationMs = Date.now() - t0;
+      logger.info(`Shutdown step completed: ${stepName}`, { step: stepName, durationMs });
+    } catch (err) {
+      const durationMs = Date.now() - t0;
+      logger.error(`Shutdown step failed: ${stepName}`, { step: stepName, durationMs, error: err.message });
+    }
+  }
+
   try {
-    await stopAcceptingNewWork();
-    await drainWorkers();
-    await notifySSEClients();
-    await closeQueues();
+    await runStep('stopAcceptingNewWork', stopAcceptingNewWork);
+    await runStep('drainWorkers', drainWorkers);
+    await runStep('notifySSEClients', notifySSEClients);
+    await runStep('closeQueues', closeQueues);
   } catch (err) {
-    logger.error('Error during shutdown', { error: err.message });
+    logger.error('Error during shutdown steps', { error: err.message });
   }
 
   // (1) Stop accepting new connections; (2) wait for in-flight requests to finish;
   // (3) only then close the database connection.
+  const serverCloseStart = Date.now();
   server.close(async () => {
+    const serverDrainDurationMs = Date.now() - serverCloseStart;
+    logger.info('HTTP server drained in-flight requests and closed', { durationMs: serverDrainDurationMs });
+    const mongoCloseStart = Date.now();
     try {
       await mongoose.disconnect();
-      logger.info('MongoDB disconnected — clean exit');
+      const mongoDurationMs = Date.now() - mongoCloseStart;
+      const totalShutdownDurationMs = Date.now() - shutdownStartTime;
+      logger.info('MongoDB disconnected — clean graceful shutdown completed', {
+        mongoDurationMs,
+        totalShutdownDurationMs,
+      });
       clearTimeout(forceExitTimer);
       process.exit(0);
     } catch (err) {
-      logger.error('Error closing MongoDB', { error: err.message });
+      const mongoDurationMs = Date.now() - mongoCloseStart;
+      logger.error('Error closing MongoDB', { error: err.message, mongoDurationMs });
       clearTimeout(forceExitTimer);
       process.exit(1);
     }
