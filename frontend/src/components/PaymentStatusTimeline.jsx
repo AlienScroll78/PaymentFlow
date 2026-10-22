@@ -1,5 +1,5 @@
 /**
- * PaymentStatusTimeline — Issue #251
+ * PaymentStatusTimeline — Issue #3
  *
  * A reusable timeline component that renders payment status transitions
  * consistently across list and detail views.
@@ -18,15 +18,12 @@
  * - The active/current status has aria-current="step".
  * - Timestamps use <time datetime={isoString}> for machine-readable dates.
  * - Icons are aria-hidden; status label provides the accessible text.
- * - Explorer links open in a new tab with rel="noopener noreferrer".
  *
  * @param {object}   props
- * @param {Array}    [props.payments]           Array of { status, createdAt, txHash } for history timeline.
- * @param {string}   [props.currentStatus]      Single status for standalone indicator mode.
- * @param {boolean}  [props.compact=false]      Compact layout for list views.
- * @param {boolean}  [props.expanded=false]     Show full lifecycle steps even for single-status mode.
- * @param {string}   [props.network='testnet']  Stellar network for explorer links ('testnet'|'mainnet').
- * @param {string}   [props.className]          Additional CSS class.
+ * @param {Array}    [props.payments]        Array of { status, createdAt, txHash } for history timeline.
+ * @param {string}   [props.currentStatus]   Single status for standalone indicator mode.
+ * @param {boolean}  [props.compact=false]   Compact layout for list views.
+ * @param {string}   [props.className]       Additional CSS class.
  */
 import React from 'react';
 import { PAYMENT_STATUS, PAYMENT_STATUS_LABELS, isTerminalStatus } from '../utils/paymentStatus';
@@ -323,10 +320,7 @@ export function StatusIndicator({ status, compact }) {
   );
 }
 
-/**
- * StatusTimeline — ordered list of historical payment states.
- */
-export function StatusTimeline({ payments, compact, network = 'testnet' }) {
+export function StatusTimeline({ payments, compact }) {
   if (!payments || payments.length === 0) {
     return (
       <p className="payment-status-timeline__empty" role="status">
@@ -404,68 +398,19 @@ export function StatusTimeline({ payments, compact, network = 'testnet' }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Default export — top-level component
-// ---------------------------------------------------------------------------
-
-/**
- * PaymentStatusTimeline
- *
- * - When `payments` is provided: renders an ordered history timeline.
- * - When `currentStatus` is provided: renders a single-status indicator
- *   (or a full lifecycle view if `expanded` is true).
- * - When `expanded` is true: shows the complete lifecycle step list.
- */
-export default function PaymentStatusTimeline({
-  payments,
-  currentStatus,
-  compact = false,
-  expanded = false,
-  network = 'testnet',
-  className = '',
-}) {
+export default function PaymentStatusTimeline({ payments, currentStatus, compact = false, className = '' }) {
   if (payments && payments.length > 0) {
     return (
-      <div
-        className={['payment-status-timeline-wrapper', className].filter(Boolean).join(' ')}
-      >
-        <StatusTimeline payments={payments} compact={compact} network={network} />
+      <div className={['payment-status-timeline-wrapper', className].filter(Boolean).join(' ')}>
+        <StatusTimeline payments={payments} compact={compact} />
       </div>
     );
   }
 
   if (currentStatus !== undefined && currentStatus !== null) {
-    // Expanded mode: show full lifecycle steps
-    if (expanded) {
-      const latestTxHash =
-        payments && payments.length > 0 ? payments[0].txHash : undefined;
-
-      return (
-        <div
-          className={['payment-status-timeline-wrapper', 'payment-status-timeline-wrapper--expanded', className].filter(Boolean).join(' ')}
-        >
-          <LifecycleSteps
-            currentStatus={currentStatus}
-            txHash={latestTxHash}
-            network={network}
-          />
-          {/* Show contextual guidance for negative terminal states in compact mode too */}
-          {!expanded && FAILED_GUIDANCE[currentStatus] && (
-            <FailedGuidance status={currentStatus} />
-          )}
-        </div>
-      );
-    }
-
     return (
-      <div
-        className={['payment-status-timeline-wrapper', className].filter(Boolean).join(' ')}
-      >
+      <div className={['payment-status-timeline-wrapper', className].filter(Boolean).join(' ')}>
         <StatusIndicator status={currentStatus} compact={compact} />
-        {/* Always show guidance below the badge for negative terminal states */}
-        {!compact && FAILED_GUIDANCE[(currentStatus || '').toUpperCase()] && (
-          <FailedGuidance status={currentStatus} />
-        )}
       </div>
     );
   }
