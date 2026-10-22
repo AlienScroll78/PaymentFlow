@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import { IconAlertTriangle, IconTrendingUp, IconUsers } from "../components/Icons";
+import { useAbortController } from "../hooks/useAbortController";
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
 
@@ -16,20 +17,20 @@ function Analytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    loadAnalyticsData();
-  }, [period]);
+  // Issue #254 — abort in-flight analytics fetch calls when the component
+  // unmounts to prevent stale responses from landing after navigation.
+  const { signal } = useAbortController();
 
-  async function loadAnalyticsData() {
+  const loadAnalyticsData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const [summaryRes, trendRes, classRes, cohortRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/analytics/summary`).then(r => r.json()),
-        fetch(`${API_BASE}/analytics/volume-trend?period=${period}`).then(r => r.json()),
-        fetch(`${API_BASE}/analytics/class-completion`).then(r => r.json()),
-        fetch(`${API_BASE}/analytics/unpaid-cohorts`).then(r => r.json()),
+        fetch(`${API_BASE}/analytics/summary`, { signal }).then(r => r.json()),
+        fetch(`${API_BASE}/analytics/volume-trend?period=${period}`, { signal }).then(r => r.json()),
+        fetch(`${API_BASE}/analytics/class-completion`, { signal }).then(r => r.json()),
+        fetch(`${API_BASE}/analytics/unpaid-cohorts`, { signal }).then(r => r.json()),
       ]);
 
       if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value.summary);
@@ -37,11 +38,17 @@ function Analytics() {
       if (classRes.status === 'fulfilled') setClassCompletion(classRes.value.data || []);
       if (cohortRes.status === 'fulfilled') setUnpaidCohorts(cohortRes.value.data || []);
     } catch (err) {
+      // Silently ignore requests cancelled on unmount or navigation.
+      if (err?.name === 'AbortError') return;
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }
+  }, [period, signal]);
+
+  useEffect(() => {
+    loadAnalyticsData();
+  }, [loadAnalyticsData]);
 
   if (loading) {
     return (
