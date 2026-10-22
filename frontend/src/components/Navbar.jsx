@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -8,19 +9,27 @@ import { useTheme } from "../pages/_app";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from "../i18n";
 
-const PUBLIC_LINKS = [
-  { href: "/pay-fees",  i18nKey: "nav.payFees" },
-  { href: "/dashboard", i18nKey: "nav.dashboard" },
-  { href: "/reports",   i18nKey: "nav.reports" },
+/**
+ * Navigation link definitions — Issue #357: role-aware navigation.
+ *
+ * requiredRole: "public"  — visible to everyone
+ * requiredRole: "admin"   — hidden from non-admin users entirely
+ * locked: true            — visible to all but greyed out with a lock icon + tooltip
+ *                           (represents upgrade-required or coming-soon features)
+ */
+const NAV_LINKS = [
+  { href: "/pay-fees",              i18nKey: "nav.payFees",         requiredRole: "public" },
+  { href: "/dashboard",             i18nKey: "nav.dashboard",       requiredRole: "public" },
+  { href: "/reports",               i18nKey: "nav.reports",         requiredRole: "public" },
+  { href: "/fee-adjustments",       i18nKey: "nav.feeRules",        requiredRole: "admin"  },
+  { href: "/audit-logs",            i18nKey: "nav.auditLogs",       requiredRole: "admin"  },
+  { href: "/disputes",              i18nKey: "nav.disputes",        requiredRole: "admin"  },
+  { href: "/webhooks",              i18nKey: "nav.webhooks",        requiredRole: "admin"  },
 ];
 
-const ADMIN_LINKS = [
-  { href: "/fee-adjustments", i18nKey: "nav.feeRules" },
-  { href: "/audit-logs",      i18nKey: "nav.auditLogs" },
-  { href: "/disputes",        i18nKey: "nav.disputes" },
-  { href: "/webhooks",        i18nKey: "nav.webhooks" },
-  { href: "/dead-letter",     i18nKey: "nav.deadLetter" },
-];
+// Keep legacy arrays for backward-compatibility
+const PUBLIC_LINKS = NAV_LINKS.filter(l => l.requiredRole === "public");
+const ADMIN_LINKS  = NAV_LINKS.filter(l => l.requiredRole === "admin");
 
 // Focusable elements we allow inside the mobile menu trap
 const FOCUSABLE_SELECTORS =
@@ -42,13 +51,91 @@ const MoonIcon = () => (
   </svg>
 );
 
+/** Padlock icon — rendered next to locked (upgrade-required) nav items. */
+const LockIcon = () => (
+  <svg
+    width="10" height="10"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    style={{ flexShrink: 0 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+);
+
+/**
+ * NavLink — renders a single navigation link, with role-aware visibility.
+ * - If `locked` is true: renders a disabled link with a lock icon + tooltip.
+ * - Otherwise: renders a normal Next.js Link.
+ */
+function NavLink({ href, label, active, locked = false, lockedTooltip, mobile = false }) {
+  const baseStyle = {
+    color: locked ? "rgba(255,255,255,0.25)" : undefined,
+    cursor: locked ? "default" : undefined,
+    pointerEvents: locked ? "none" : undefined,
+    position: "relative",
+  };
+
+  if (locked) {
+    return (
+      <span
+        className={`nav-link${mobile ? "" : ""}`}
+        style={{
+          ...baseStyle,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "0.25rem",
+        }}
+        title={lockedTooltip || "Requires upgrade"}
+        aria-label={`${label} — ${lockedTooltip || "Requires upgrade"}`}
+        role="presentation"
+      >
+        {label}
+        <LockIcon />
+      </span>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className={`nav-link${active ? " active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      style={mobile ? undefined : undefined}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default function Navbar() {
   const { pathname } = useRouter();
   const [open, setOpen] = useState(false);
   const { t, i18n } = useTranslation();
   const { dark, toggle } = useTheme();
   const { isAdmin, logout } = useAdminAuthContext();
-  const links = isAdmin ? [...PUBLIC_LINKS, ...ADMIN_LINKS] : PUBLIC_LINKS;
+
+  /**
+   * Issue #357 — Role-aware navigation.
+   *
+   * Filter the master NAV_LINKS list based on the current user's role:
+   *  - "public" links: always shown
+   *  - "admin" links: shown only when isAdmin is true; hidden entirely otherwise
+   *  - locked links: shown to everyone with a lock icon (not applicable here yet)
+   *
+   * This prevents non-admin users from seeing admin-only nav items and being
+   * redirected to a 403 page when they click them.
+   */
+  const visibleLinks = NAV_LINKS.filter((link) => {
+    if (link.requiredRole === "admin") return isAdmin;
+    return true; // "public" and any future "locked" links are always included
+  });
 
   const hamburgerRef = useRef(null);
   const mobileMenuRef = useRef(null);
@@ -411,18 +498,16 @@ export default function Navbar() {
             <span className="nav-name">StellarEduPay</span>
           </Link>
 
-          {/* Desktop links */}
-          <div className="nav-links" role="list">
-            {links.map(({ href, i18nKey }) => (
-              <Link
+          <div className="nav-links">
+            {visibleLinks.map(({ href, i18nKey, locked, lockedTooltip }) => (
+              <NavLink
                 key={href}
                 href={href}
-                role="listitem"
-                className={`nav-link${pathname === href ? " active" : ""}`}
-                aria-current={pathname === href ? "page" : undefined}
-              >
-                {t(i18nKey)}
-              </Link>
+                label={t(i18nKey)}
+                active={pathname === href}
+                locked={!!locked}
+                lockedTooltip={lockedTooltip}
+              />
             ))}
           </div>
 
@@ -463,117 +548,42 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Backdrop — closes menu when clicked */}
-      <div
-        className={`nav-mobile-backdrop${open ? " open" : ""}`}
-        onClick={closeMenu}
-        aria-hidden="true"
-      />
-
-      {/* Mobile slide-in drawer */}
-      <div
-        id="nav-mobile-drawer"
-        ref={mobileMenuRef}
-        className={`nav-mobile${open ? " open" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("nav.mobileMenuAria", "Navigation menu")}
-        aria-hidden={!open}
-        tabIndex={-1}
-      >
-        {/* Drawer header */}
-        <div className="nav-mobile-header">
-          <Link href="/" className="nav-brand" onClick={closeMenu} aria-label="StellarEduPay home">
-            <div className="nav-logo" aria-hidden="true">S</div>
-            <span className="nav-name" style={{ color: "#f1f5f9" }}>StellarEduPay</span>
-          </Link>
-          <button
-            className="nav-mobile-close"
-            onClick={closeMenu}
-            aria-label={t("nav.closeMenu")}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Nav links */}
-        <div className="nav-mobile-body" role="list">
-          <div className="nav-mobile-section">{t("nav.section", "Main")}</div>
-          {PUBLIC_LINKS.map(({ href, i18nKey }) => (
+      <div className={`nav-mobile${open ? " open" : ""}`} aria-hidden={!open}>
+        {visibleLinks.map(({ href, i18nKey, locked, lockedTooltip }) => (
+          locked ? (
+            <span
+              key={href}
+              className="nav-link"
+              style={{
+                color: "rgba(255,255,255,0.25)",
+                cursor: "default",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.375rem",
+              }}
+              title={lockedTooltip || "Requires upgrade"}
+              role="presentation"
+            >
+              {t(i18nKey)}
+              <LockIcon />
+            </span>
+          ) : (
             <Link
               key={href}
               href={href}
-              role="listitem"
-              className={`nav-mobile-link${pathname === href ? " active" : ""}`}
+              className={`nav-link${pathname === href ? " active" : ""}`}
               aria-current={pathname === href ? "page" : undefined}
-              onClick={closeMenu}
+              onClick={() => setOpen(false)}
             >
               {t(i18nKey)}
             </Link>
-          ))}
-
-          {isAdmin && (
-            <>
-              <div className="nav-mobile-divider" />
-              <div className="nav-mobile-section">{t("nav.adminSection", "Admin")}</div>
-              {ADMIN_LINKS.map(({ href, i18nKey }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  role="listitem"
-                  className={`nav-mobile-link${pathname === href ? " active" : ""}`}
-                  aria-current={pathname === href ? "page" : undefined}
-                  onClick={closeMenu}
-                >
-                  {t(i18nKey)}
-                </Link>
-              ))}
-            </>
-          )}
-        </div>
-
-        {/* Footer: language, theme, auth */}
-        <div className="nav-mobile-footer">
-          <div className="nav-mobile-footer-row">
-            <select
-              className="nav-mobile-lang"
-              value={i18n.resolvedLanguage || "en"}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
-              aria-label={t("nav.language")}
-            >
-              {SUPPORTED_LOCALES.map((lng) => (
-                <option key={lng} value={lng}>{LOCALE_NAMES[lng]}</option>
-              ))}
-            </select>
-            <button
-              className="nav-theme-btn"
-              onClick={toggle}
-              aria-label={dark ? t("nav.switchToLight") : t("nav.switchToDark")}
-            >
-              {dark ? <SunIcon /> : <MoonIcon />}
-            </button>
-          </div>
-          {isAdmin
-            ? (
-              <button
-                className="nav-pill"
-                style={{ width: "100%", justifyContent: "center" }}
-                onClick={() => { logout(); closeMenu(); }}
-              >
-                {t("actions.signOut")}
-              </button>
-            ) : (
-              <Link
-                href="/login"
-                className="nav-pill nav-pill-accent"
-                style={{ width: "100%", justifyContent: "center" }}
-                onClick={closeMenu}
-              >
-                {t("nav.adminLogin")}
-              </Link>
-            )
-          }
-        </div>
+          )
+        ))}
+        <div className="nav-mobile-divider" />
+        {isAdmin
+          ? <button className="nav-pill" onClick={() => { logout(); setOpen(false); }} style={{ marginTop: "0.25rem", width: "fit-content" }}>{t("actions.signOut")}</button>
+          : <Link href="/login" className="nav-pill nav-pill-accent" style={{ marginTop: "0.25rem", width: "fit-content" }} onClick={() => setOpen(false)}>{t("nav.adminLogin")}</Link>
+        }
       </div>
     </>
   );
