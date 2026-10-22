@@ -24,6 +24,7 @@ import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOpt
 import { formatRelative } from "../utils/dateTime";
 
 const DEFAULT_PAGE_SIZE = 20;
+const OPTIMISTIC_STUDENT_FIELDS = ["name", "class", "parentEmail", "parentPhone", "reminderOptOut"];
 
 function Dashboard() {
   const { t } = useTranslation();
@@ -55,6 +56,7 @@ function Dashboard() {
   const [error, setError]                     = useState(null);
   const [editingStudent, setEditingStudent]   = useState(null);
   const [editingStudentData, setEditingStudentData] = useState(null);
+  const [mutationToast, setMutationToast] = useState("");
 
   // Table density (compact / default / comfortable) — Issue #113
   const { density, setDensity } = useTableDensity();
@@ -81,6 +83,7 @@ function Dashboard() {
   // Holds the AbortController for the most-recent fetchStudents call so
   // superseded (stale) requests can be cancelled before the next one starts.
   const studentsAbortRef = useRef(null);
+  const optimisticStudentRef = useRef(null);
 
   useEffect(() => {
     clearTimeout(searchDebounceRef.current);
@@ -194,8 +197,42 @@ function Dashboard() {
   }
 
   function handleSaveStudent() {
+    optimisticStudentRef.current = null;
     handleCloseForm();
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
+  }
+
+  function handleOptimisticStudentUpdate(studentId, updates) {
+    const current = students.find((student) => student.studentId === studentId);
+    if (!current) return;
+    const safeUpdates = Object.fromEntries(
+      OPTIMISTIC_STUDENT_FIELDS
+        .filter((field) => Object.prototype.hasOwnProperty.call(updates, field))
+        .map((field) => [field, updates[field]])
+    );
+    optimisticStudentRef.current = {
+      studentId,
+      previous: Object.fromEntries(
+        OPTIMISTIC_STUDENT_FIELDS.map((field) => [field, current[field]])
+      ),
+    };
+    setStudents((previous) => previous.map((student) => (
+      student.studentId === studentId ? { ...student, ...safeUpdates } : student
+    )));
+  }
+
+  function handleOptimisticStudentRollback(reason) {
+    const snapshot = optimisticStudentRef.current;
+    optimisticStudentRef.current = null;
+    if (snapshot) {
+      setStudents((previous) => previous.map((student) => (
+        student.studentId === snapshot.studentId
+          ? { ...student, ...snapshot.previous }
+          : student
+      )));
+    }
+    setMutationToast(`Student update failed. Previous values restored. ${reason}`);
+    setTimeout(() => setMutationToast(""), 5000);
   }
 
   // Toggle expanded detail row for a student — Issue #113
@@ -363,6 +400,11 @@ function Dashboard() {
       {(summaryError || studentsError) && (
         <div aria-live="assertive" aria-atomic="true" className="sr-only">
           {summaryError || studentsError}
+        </div>
+      )}
+      {mutationToast && (
+        <div role="alert" aria-live="assertive" className="alert alert-danger" style={{ position: "fixed", right: "1rem", bottom: "1rem", zIndex: 1100, maxWidth: "min(32rem, calc(100vw - 2rem))" }}>
+          {mutationToast}
         </div>
       )}
 
@@ -682,6 +724,8 @@ function Dashboard() {
           student={editingStudentData}
           onClose={handleCloseForm}
           onSave={handleSaveStudent}
+          onOptimisticUpdate={handleOptimisticStudentUpdate}
+          onRollback={handleOptimisticStudentRollback}
         />
       )}
     </>
