@@ -41,6 +41,14 @@ function checkHeader(name, value) {
   }
 
   switch (name.toLowerCase()) {
+    case "strict-transport-security": {
+      const maxAge = Number(value.match(/max-age=(\d+)/i)?.[1] || 0);
+      if (maxAge < 31536000 || !/includesubdomains/i.test(value)) {
+        return { pass: false, detail: "Expected max-age of at least one year and includeSubDomains" };
+      }
+      return { pass: true, detail: value };
+    }
+
     case "content-security-policy": {
       const required = [
         "default-src",
@@ -99,6 +107,7 @@ function checkHeader(name, value) {
 // Headers to audit, in display order.
 const AUDITED_HEADERS = [
   "Content-Security-Policy",
+  "Strict-Transport-Security",
   "X-Frame-Options",
   "X-Content-Type-Options",
   "Referrer-Policy",

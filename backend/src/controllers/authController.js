@@ -6,6 +6,7 @@ const logger = require('../utils/logger');
 const { getRedisClient, isRedisReady } = require('../config/redisClient');
 const { get, set, del } = require('../cache');
 const { sendAdminAlert } = require('../services/alertService');
+const School = require('../models/schoolModel');
 
 // ── Constant-time string comparison ───────────────────────────────────────────
 
@@ -697,26 +698,19 @@ async function handleLogout(req, res) {
 
 async function handleMe(req, res) {
   const p = req.admin;
-  const featureNames = [
-    'paymentPlans', 'feeAdjustments', 'disputes', 'refunds', 'multiAsset',
-    'paymentVerification', 'bulkStudentImport', 'sourceValidation',
-  ];
-  let enabledFeatures = [];
+  let timezone = 'UTC';
   if (p.schoolId) {
     try {
-      const { getSchoolSetting } = require('../services/schoolSettingsService');
-      enabledFeatures = await getSchoolSetting(p.schoolId, 'betaFeatures');
+      const school = await School.findOne({ schoolId: p.schoolId }).select('timezone').lean();
+      timezone = school?.timezone || 'UTC';
     } catch (err) {
-      logger.warn('[AuthController] Failed to load session feature flags', { error: err.message });
+      logger.warn('[AuthController] Failed to resolve school timezone', { error: err.message });
     }
   }
-  const features = Object.fromEntries(featureNames.map((name) => [
-    name,
-    Array.isArray(enabledFeatures) && enabledFeatures.includes(name),
-  ]));
   return res.json({
     userId:   p.userId   || p.sub || null,
     schoolId: p.schoolId || null,
+    timezone,
     roles:    Array.isArray(p.roles) ? p.roles : (p.role ? [p.role] : []),
     features,
     exp:      p.exp      || null,

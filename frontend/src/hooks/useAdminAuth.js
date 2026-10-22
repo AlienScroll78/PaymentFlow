@@ -49,6 +49,7 @@ export function useAdminAuth() {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [schoolId, setSchoolId] = useState(null);
+  const [timeZone, setTimeZone] = useState('UTC');
   const [userId, setUserId] = useState(null);
   const [features, setFeatures] = useState({});
   const [checked, setChecked] = useState(false);
@@ -74,6 +75,7 @@ export function useAdminAuth() {
     if (!mountedRef.current) return;
     setIsAdmin(true);
     setSchoolId(data.schoolId || null);
+    setTimeZone(data.timezone || 'UTC');
     setUserId(data.userId || null);
     setFeatures(data.features && typeof data.features === 'object' ? data.features : {});
     setAuthMeError(false);
@@ -97,6 +99,7 @@ export function useAdminAuth() {
         if (!mountedRef.current) return;
         setIsAdmin(false);
         setSchoolId(null);
+        setTimeZone('UTC');
         setUserId(null);
         setFeatures({});
       })
@@ -120,6 +123,7 @@ export function useAdminAuth() {
         // /auth/me context could not be loaded so the UI can offer a retry.
         setIsAdmin(true);
         setSchoolId(null);
+        setTimeZone('UTC');
         setUserId(null);
         setFeatures({});
         setAuthMeError(true);
@@ -150,6 +154,7 @@ export function useAdminAuth() {
     }).catch(() => console.debug('[useAdminAuth] logout request failed'));
     setIsAdmin(false);
     setSchoolId(null);
+    setTimeZone('UTC');
     setUserId(null);
     setFeatures({});
     setAuthMeError(false);
@@ -162,5 +167,5 @@ export function useAdminAuth() {
     router.push('/login');
   }, [router]);
 
-  return { isAdmin, checked, login, logout, schoolId, userId, features, authMeError, retryAuth };
+  return { isAdmin, checked, login, logout, schoolId, timeZone, userId, authMeError, retryAuth };
 }

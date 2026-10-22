@@ -48,6 +48,7 @@ const CRITICAL_STEPS = [
   "Contact support with the reference number for assistance.",
 ];
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
+import TimestampDisplay from "./TimestampDisplay";
 import { generateIdempotencyKey } from "../utils/idempotencyKey";
 import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
 import PaymentFailureBanner from "./PaymentFailureBanner";
@@ -259,7 +260,7 @@ export default function VerifyPayment({ disabled = false }) {
             <InfoRow label={t("verifyPayment.memoLabel")} mono>{result.memo}</InfoRow>
             <InfoRow label={t("verifyPayment.date")}>
               {result.date
-                ? <TimestampDisplay iso={result.date} mode={DISPLAY_MODE.UTC} />
+                ? <TimestampDisplay iso={result.date} />
                 : "—"}
             </InfoRow>
             {result.feeValidation?.message && st !== "valid" && (

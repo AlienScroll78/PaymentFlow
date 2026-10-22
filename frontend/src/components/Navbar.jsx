@@ -7,6 +7,7 @@ import TestnetBanner from "./TestnetBanner";
 import NotificationCenter from "./NotificationCenter";
 import { useTheme } from "../pages/_app";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import { prefetchDashboardData } from "../hooks/useDashboardLoader";
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from "../i18n";
 
 /**
@@ -507,11 +508,14 @@ export default function Navbar() {
               <NavLink
                 key={href}
                 href={href}
-                label={t(i18nKey)}
-                active={pathname === href}
-                locked={!!locked}
-                lockedTooltip={lockedTooltip}
-              />
+                role="listitem"
+                className={`nav-link${pathname === href ? " active" : ""}`}
+                aria-current={pathname === href ? "page" : undefined}
+                onMouseEnter={href === "/dashboard" ? prefetchDashboardData : undefined}
+                onFocus={href === "/dashboard" ? prefetchDashboardData : undefined}
+              >
+                {t(i18nKey)}
+              </Link>
             ))}
           </div>
 
@@ -577,7 +581,9 @@ export default function Navbar() {
               href={href}
               className={`nav-link${pathname === href ? " active" : ""}`}
               aria-current={pathname === href ? "page" : undefined}
-              onClick={() => setOpen(false)}
+              onClick={closeMenu}
+              onMouseEnter={href === "/dashboard" ? prefetchDashboardData : undefined}
+              onFocus={href === "/dashboard" ? prefetchDashboardData : undefined}
             >
               {t(i18nKey)}
             </Link>

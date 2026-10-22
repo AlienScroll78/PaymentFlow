@@ -59,7 +59,7 @@ const KEYS = {
   overpayments: () => 'overpayments',
   suspicious: () => 'suspicious',
   pending: () => 'pending',
-  report: (schoolId, startDate, endDate, dataVersion = '') => `report:${schoolId}:${startDate || ''}:${endDate || ''}:v${dataVersion || 'latest'}`,
+  report: (schoolId, startDate, endDate, dataVersion = '', timezone = 'UTC') => `report:${schoolId}:${startDate || ''}:${endDate || ''}:${timezone}:v${dataVersion || 'latest'}`,
 };
 
 /**

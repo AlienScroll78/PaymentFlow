@@ -27,17 +27,9 @@ async function processReportJob(job) {
     let contentType;
     let actualSchemaVersion = null;
     if (type === 'accounting_csv') {
-      const result = await generateAccountingCsv({ schoolId, startDate, endDate });
-      artifactKey = `reports/${schoolId}/${jobId}.csv`;
-      contentType = 'text/csv';
-      actualSchemaVersion = result.schemaVersion;
-      await storeReportArtifact(artifactKey, result.csv, contentType);
-    } else {
-      const report = await generateReport({ schoolId, startDate, endDate, timezone });
-      const body = format === 'csv' ? reportToCsv(report) : JSON.stringify(report);
-      artifactKey = `reports/${schoolId}/${jobId}.${format === 'csv' ? 'csv' : 'json'}`;
-      contentType = format === 'csv' ? 'text/csv' : 'application/json';
-      await storeReportArtifact(artifactKey, body, contentType);
+      const { csv, schemaVersion: sv } = await generateAccountingCsv({ schoolId, startDate, endDate, timezone });
+      await setJobCompleted(jobId, { csv, schemaVersion: sv });
+      return { success: true, jobId, type };
     }
 
     await setJobCompleted(jobId, { artifactKey, schemaVersion: actualSchemaVersion || schemaVersion });

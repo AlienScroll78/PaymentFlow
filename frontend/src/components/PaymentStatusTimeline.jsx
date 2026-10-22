@@ -27,6 +27,7 @@
  */
 import React from 'react';
 import { PAYMENT_STATUS, PAYMENT_STATUS_LABELS, isTerminalStatus } from '../utils/paymentStatus';
+import TimestampDisplay from './TimestampDisplay';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -378,9 +379,9 @@ export function StatusTimeline({ payments, compact }) {
             <span className="payment-status-timeline__content">
               <span className="payment-status-timeline__label">{label}</span>
               {isoDate && (
-                <time className="payment-status-timeline__time" dateTime={isoDate}>
-                  {new Date(isoDate).toLocaleString()}
-                </time>
+                <span className="payment-status-timeline__time">
+                  <TimestampDisplay iso={isoDate} />
+                </span>
               )}
               {showExplorer && (
                 <ExplorerLink
