@@ -4,7 +4,14 @@
  * notificationCreationSubscriber.js
  *
  * Subscribes to the paymentEvents EventEmitter and creates in-app notifications
- * for significant payment and dispute lifecycle events.
+ * for significant payment, dispute, report, and system lifecycle events.
+ *
+ * Supported events (Issue #362):
+ *   - payment.saved    → payment.confirmed / payment.failed notification
+ *   - dispute.created  → dispute.created notification
+ *   - dispute.updated  → dispute.updated notification
+ *   - report.ready     → report.ready notification
+ *   - system.alert     → system.alert notification
  *
  * Security:
  *   - Notification metadata must NOT contain txHash, wallet addresses, or raw PII
@@ -143,6 +150,77 @@ async function onDisputeUpdated(payload) {
 }
 
 /**
+ * Handle a 'report.ready' event.
+ *
+ * Fired when a report job has completed and is available for download.
+ *
+ * @param {object} payload - { schoolId, jobId, reportType, downloadUrl }
+ */
+async function onReportReady(payload) {
+  const { schoolId, jobId, reportType, downloadUrl } = payload || {};
+
+  if (!schoolId) {
+    logger.warn('report.ready event missing schoolId — notification skipped');
+    return;
+  }
+
+  try {
+    await createNotification({
+      schoolId,
+      type: 'report.ready',
+      severity: 'info',
+      title: 'Report Ready',
+      message: reportType
+        ? `Your ${reportType} report is ready for download.`
+        : 'Your report is ready for download.',
+      deepLink: downloadUrl || '/reports',
+      metadata: { jobId, reportType },
+    });
+  } catch (err) {
+    logger.error('Failed to create report.ready notification', {
+      schoolId,
+      jobId,
+      err: err.message,
+    });
+  }
+}
+
+/**
+ * Handle a 'system.alert' event.
+ *
+ * Fired for system-wide alerts such as maintenance windows, sync lag, or
+ * critical health status changes.
+ *
+ * @param {object} payload - { schoolId, alertType, title, message, severity }
+ */
+async function onSystemAlert(payload) {
+  const { schoolId, alertType, title, message, severity } = payload || {};
+
+  if (!schoolId) {
+    logger.warn('system.alert event missing schoolId — notification skipped');
+    return;
+  }
+
+  try {
+    await createNotification({
+      schoolId,
+      type: 'system.alert',
+      severity: severity || 'warning',
+      title: title || 'System Alert',
+      message: message || 'A system alert has been raised.',
+      deepLink: null,
+      metadata: { alertType },
+    });
+  } catch (err) {
+    logger.error('Failed to create system.alert notification', {
+      schoolId,
+      alertType,
+      err: err.message,
+    });
+  }
+}
+
+/**
  * Register all notification event subscribers on the paymentEvents bus.
  *
  * Called once from app.js after all services are initialised.
@@ -151,9 +229,11 @@ function registerNotificationSubscribers() {
   paymentEvents.on('payment.saved', onPaymentSaved);
   paymentEvents.on('dispute.created', onDisputeCreated);
   paymentEvents.on('dispute.updated', onDisputeUpdated);
+  paymentEvents.on('report.ready', onReportReady);
+  paymentEvents.on('system.alert', onSystemAlert);
 
   logger.info('Notification subscribers registered', {
-    events: ['payment.saved', 'dispute.created', 'dispute.updated'],
+    events: ['payment.saved', 'dispute.created', 'dispute.updated', 'report.ready', 'system.alert'],
   });
 }
 

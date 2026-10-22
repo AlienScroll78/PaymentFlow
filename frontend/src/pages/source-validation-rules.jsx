@@ -8,7 +8,9 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import { useAbortController } from "../hooks/useAbortController";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
+import { SkeletonDetailCard } from "../components/Skeleton";
 
 const EMPTY_FORM = { publicKey: "", label: "" };
 
@@ -33,15 +35,23 @@ export default function SourceValidationRules() {
   const [formError, setFormError]     = useState(null);
   const [formSuccess, setFormSuccess] = useState(false);
 
+  // Issue #254 — abort in-flight requests when the component unmounts to
+  // prevent stale responses from updating the wrong route's state.
+  const { signal } = useAbortController();
+
   const load = useCallback(() => {
     if (!schoolId) return;
     setLoading(true);
     setError(null);
-    getSourceValidationRules(schoolId)
+    getSourceValidationRules(schoolId, { signal })
       .then(({ data }) => setRules(data))
-      .catch(() => setError("Could not load source validation rules."))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError("Could not load source validation rules.");
+      })
       .finally(() => setLoading(false));
-  }, [schoolId]);
+  }, [schoolId, signal]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -161,7 +171,7 @@ export default function SourceValidationRules() {
         </div>
 
         {loading ? (
-          <div style={{ padding: "1.5rem" }}>Loading…</div>
+          <div style={{ padding: "1.5rem" }}><SkeletonDetailCard rows={4} /></div>
         ) : rules.length === 0 ? (
           <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
             <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>No rules yet</p>

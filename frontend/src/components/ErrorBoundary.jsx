@@ -25,6 +25,7 @@
 import { Component } from "react";
 import Link from "next/link";
 import { withTranslation } from "react-i18next";
+import { reportRenderError } from "../services/errorTracker";
 
 /**
  * Generate a short, URL-safe correlation ID.
@@ -70,23 +71,13 @@ class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     const { correlationId } = this.state;
-    const { onError } = this.props;
+    const { onError, sectionName = "Application" } = this.props;
+    const componentStack = info?.componentStack || "";
 
-    // Log to console (dev / server-side tooling picks this up).
-    // Correlation ID is included so it can be matched with the UI reference.
-    // Stack and message are intentionally NOT forwarded to any external service
-    // here to avoid accidental PII/detail leakage; consumers should filter
-    // appropriately in their onError callback.
-    console.error("[ErrorBoundary] Unhandled render error", {
-      correlationId,
-      // Omit error.message and componentStack from the structured log to
-      // avoid leaking sensitive implementation details.
-      name: error?.name,
-    });
+    reportRenderError(error, componentStack, { correlationId, section: sectionName });
 
     if (typeof onError === "function") {
-      // Surface the correlation ID to callers; omit raw message/stack.
-      onError({ correlationId, name: error?.name });
+      onError({ error, componentStack, correlationId, section: sectionName });
     }
   }
 
@@ -96,7 +87,7 @@ class ErrorBoundary extends Component {
   }
 
   render() {
-    const { t, children } = this.props;
+    const { t, children, sectionName = "Application" } = this.props;
     const { hasError, correlationId } = this.state;
 
     if (hasError) {
@@ -119,7 +110,7 @@ class ErrorBoundary extends Component {
           <div style={{ fontSize: "3rem" }} aria-hidden="true">⚠️</div>
 
           <h2 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
-            {t("errorBoundary.title")}
+            {t("errorBoundary.sectionTitle", { section: sectionName })}
           </h2>
 
           <p

@@ -104,6 +104,20 @@ export const IconChevronRight = ({ size = 16 }) => (
   </svg>
 );
 
+export const IconChevronsLeft = ({ size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="11 18 5 12 11 6"/>
+    <polyline points="18 18 12 12 18 6"/>
+  </svg>
+);
+
+export const IconChevronsRight = ({ size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="13 18 19 12 13 6"/>
+    <polyline points="6 18 12 12 6 6"/>
+  </svg>
+);
+
 export const IconSearch = ({ size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8"/>
