@@ -126,6 +126,8 @@ studentSchema.index({ studentId: 1, version: 1 });
 studentSchema.index({ feePaid: 1, class: 1 });
 studentSchema.index({ totalPaid: 1 });
 studentSchema.index({ name: 'text', studentId: 'text' });
+// Issue #39 — getAllStudents list (not deleted, sorted by createdAt)
+studentSchema.index({ schoolId: 1, deletedAt: 1, createdAt: -1 });
 
 // ── Parent contact PII encryption at rest — Issue #1480 ─────────────────────
 // Encrypt parentEmail/parentPhone before persisting, then decrypt them back

@@ -16,6 +16,13 @@ const crypto = require('crypto');
 const PREFIX = 'corr_';
 
 /**
+ * Characters outside this set are stripped from untrusted incoming IDs.
+ * Allows: a-z A-Z 0-9 _ : . -
+ */
+const UNSAFE_CHARS = /[^a-zA-Z0-9_:.-]/g;
+const MAX_ACCEPTED_LENGTH = 128;
+
+/**
  * Derive a correlationId from a transaction hash. Deterministic: the same
  * txHash always yields the same correlationId.
  */
@@ -40,4 +47,20 @@ function resolveCorrelationId(explicitCorrelationId, txHash) {
   return explicitCorrelationId || deriveCorrelationId(txHash);
 }
 
-module.exports = { deriveCorrelationId, generateCorrelationId, resolveCorrelationId };
+/**
+ * Accept and sanitize a correlation ID coming from an untrusted source
+ * (e.g. a queue job payload, webhook header, or incoming HTTP request header).
+ *
+ * Strips characters outside the safe set and caps at MAX_ACCEPTED_LENGTH.
+ * Returns a freshly generated ID when nothing usable remains.
+ *
+ * @param {*} raw  Untrusted raw ID string.
+ * @returns {string}  A safe, non-empty correlation ID.
+ */
+function acceptCorrelationId(raw) {
+  if (!raw || typeof raw !== 'string') return generateCorrelationId();
+  const cleaned = raw.replace(UNSAFE_CHARS, '').slice(0, MAX_ACCEPTED_LENGTH);
+  return cleaned.length > 0 ? cleaned : generateCorrelationId();
+}
+
+module.exports = { deriveCorrelationId, generateCorrelationId, resolveCorrelationId, acceptCorrelationId };
