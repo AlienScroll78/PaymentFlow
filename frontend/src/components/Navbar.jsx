@@ -19,6 +19,7 @@ const ADMIN_LINKS = [
   { href: "/audit-logs",      i18nKey: "nav.auditLogs" },
   { href: "/disputes",        i18nKey: "nav.disputes" },
   { href: "/webhooks",        i18nKey: "nav.webhooks" },
+  { href: "/dead-letter",     i18nKey: "nav.deadLetter" },
 ];
 
 // Focusable elements we allow inside the mobile menu trap
