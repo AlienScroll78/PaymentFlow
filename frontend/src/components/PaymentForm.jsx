@@ -53,17 +53,7 @@ function InfoRow({ label, children }) {
   );
 }
 
-/**
- * @param {{ initialStudentId?: string, isOnline?: boolean, wasOffline?: boolean, tokenExp?: number|null }} props
- *   isOnline  — when false, disables the student lookup / payment submit button
- *               to prevent duplicate submissions while the device is offline.
- *   wasOffline — when true (linger window after reconnect), shows a stale-state
- *               warning so the parent can offer a refresh before re-submitting.
- *   tokenExp  — Unix timestamp (seconds) of the current JWT expiry.  When
- *               provided, a session-expiry warning toast is shown 5 minutes
- *               before the token expires (Issue #253).
- */
-export default function PaymentForm({ initialStudentId = "", isOnline = true, wasOffline = false, tokenExp = null }) {
+export default function PaymentForm({ initialStudentId = "" }) {
   const { t } = useTranslation();
   const [studentId, setStudentId]             = useState(initialStudentId);
   const [shareCopied, setShareCopied]         = useState(false);
