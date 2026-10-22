@@ -19,6 +19,8 @@ export const DEFAULT_BACKOFF_FACTOR = 1.5;
  *     refresh when the tab becomes visible again.
  *   - Exponential backoff on failed fetches; resets to initialInterval on success.
  *   - AbortController cancellation on cleanup.
+ *   - Manual refresh: resets backoff and fires an immediate poll.
+ *   - 'Last checked X seconds ago' indicator for user reassurance.
  *
  * @see usePaymentEvents for SSE-based real-time updates when available.
  *
@@ -30,7 +32,14 @@ export const DEFAULT_BACKOFF_FACTOR = 1.5;
  * @param {number}   [options.initialInterval]  Initial poll interval (ms). Default 3000.
  * @param {number}   [options.maxInterval]      Backoff ceiling (ms). Default 30000.
  * @param {number}   [options.backoffFactor]    Failure backoff multiplier. Default 1.5.
- * @returns {{ polling: boolean, lastUpdated: Date|null, error: string|null, consecutiveErrors: number }}
+ * @returns {{
+ *   polling: boolean,
+ *   lastUpdated: Date|null,
+ *   lastCheckedSecondsAgo: number|null,
+ *   error: string|null,
+ *   consecutiveErrors: number,
+ *   manualRefresh: () => void,
+ * }}
  */
 export function usePendingPaymentPoller({
   studentId,
@@ -43,16 +52,19 @@ export function usePendingPaymentPoller({
 } = {}) {
   const [polling, setPolling] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastCheckedSecondsAgo, setLastCheckedSecondsAgo] = useState(null);
   const [error, setError] = useState(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
 
   const timerRef = useRef(null);
+  const tickerRef = useRef(null);
   const abortRef = useRef(null);
   const intervalRef = useRef(initialInterval);
   const consecutiveErrorsRef = useRef(0);
   const isTerminalRef = useRef(isTerminalStatus(currentStatus));
   const onUpdateRef = useRef(onUpdate);
   const enabledRef = useRef(enabled);
+  const lastUpdatedRef = useRef(null);
 
   // Keep refs current without causing re-renders
   useEffect(() => { onUpdateRef.current = onUpdate; }, [onUpdate]);
@@ -64,10 +76,24 @@ export function usePendingPaymentPoller({
     isTerminalRef.current = isTerminalStatus(currentStatus);
     if (isTerminalRef.current) {
       clearTimeout(timerRef.current);
+      clearInterval(tickerRef.current);
       abortRef.current?.abort();
       setPolling(false);
     }
   }, [currentStatus]);
+
+  // ── "Last checked X seconds ago" ticker ──────────────────────────────────────
+  // Updates the displayed age of the last successful check every second.
+  useEffect(() => {
+    tickerRef.current = setInterval(() => {
+      if (lastUpdatedRef.current) {
+        const secs = Math.floor((Date.now() - lastUpdatedRef.current.getTime()) / 1000);
+        setLastCheckedSecondsAgo(secs);
+      }
+    }, 1000);
+
+    return () => clearInterval(tickerRef.current);
+  }, []);
 
   const poll = useCallback(() => {
     if (!enabledRef.current || isTerminalRef.current || !studentId) return;
@@ -88,7 +114,11 @@ export function usePendingPaymentPoller({
         consecutiveErrorsRef.current = 0;
         setConsecutiveErrors(0);
         setError(null);
-        setLastUpdated(new Date());
+
+        const now = new Date();
+        lastUpdatedRef.current = now;
+        setLastUpdated(now);
+        setLastCheckedSecondsAgo(0);
         setPolling(false);
 
         const payments = Array.isArray(data) ? data : (data?.payments ?? []);
@@ -126,6 +156,23 @@ export function usePendingPaymentPoller({
         }
       });
   }, [studentId, initialInterval, backoffFactor, maxInterval]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Manual refresh ────────────────────────────────────────────────────────────
+  // Resets the backoff interval to the initial value and fires an immediate poll.
+  // This is suitable for wiring to a "Refresh now" button.
+  const manualRefresh = useCallback(() => {
+    if (isTerminalRef.current || !studentId) return;
+
+    // Reset backoff so the user gets the fast cadence back
+    intervalRef.current = initialInterval;
+    consecutiveErrorsRef.current = 0;
+    setConsecutiveErrors(0);
+    setError(null);
+
+    // Cancel any scheduled tick and fire immediately
+    clearTimeout(timerRef.current);
+    poll();
+  }, [studentId, initialInterval, poll]);
 
   // ── Page-visibility handling ─────────────────────────────────────────────────
 
@@ -170,7 +217,7 @@ export function usePendingPaymentPoller({
     };
   }, [enabled, studentId, poll, currentStatus, initialInterval]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { polling, lastUpdated, error, consecutiveErrors };
+  return { polling, lastUpdated, lastCheckedSecondsAgo, error, consecutiveErrors, manualRefresh };
 }
 
 export default usePendingPaymentPoller;
