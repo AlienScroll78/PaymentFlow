@@ -215,6 +215,8 @@ export function setAdapter(fn) {
 // Core API
 // ---------------------------------------------------------------------------
 
+export const SCHEMA_VERSION = '1.0.0';
+
 /**
  * Strip both globally sensitive fields and event-specific sensitive fields.
  *
@@ -286,11 +288,12 @@ export function track(eventKey, properties = {}) {
   }
 
   const safe = stripSensitive(properties, spec.sensitiveProperties);
+  safe.schemaVersion = SCHEMA_VERSION;
 
   // Warn in development when unknown (but non-sensitive) properties are passed.
   if (process.env.NODE_ENV !== 'production') {
     const allowed = new Set(spec.allowedProperties);
-    const unknown = Object.keys(safe).filter((k) => !allowed.has(k));
+    const unknown = Object.keys(safe).filter((k) => k !== 'schemaVersion' && !allowed.has(k));
     if (unknown.length > 0) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -302,3 +305,14 @@ export function track(eventKey, properties = {}) {
 
   _adapter(spec.name, safe);
 }
+
+export const analytics = {
+  track,
+  setAdapter,
+  validateEvent,
+  EVENTS,
+  EVENT_CATALOG,
+  SCHEMA_VERSION,
+};
+
+export default analytics;

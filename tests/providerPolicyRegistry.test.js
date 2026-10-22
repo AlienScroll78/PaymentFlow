@@ -216,4 +216,26 @@ describe('providerPolicyRegistry — observability contract', () => {
       }
     }
   });
+
+  test('environment variable override modifies policy timeout and attempts (#290)', () => {
+    process.env.PROVIDER_STELLAR_GETACCOUNT_TIMEOUT_MS = '99999';
+    process.env.PROVIDER_STELLAR_GETACCOUNT_MAX_ATTEMPTS = '7';
+
+    const p = getPolicy('stellar', 'getAccount');
+    expect(p.timeoutMs).toBe(99999);
+    expect(p.maxAttempts).toBe(7);
+
+    delete process.env.PROVIDER_STELLAR_GETACCOUNT_TIMEOUT_MS;
+    delete process.env.PROVIDER_STELLAR_GETACCOUNT_MAX_ATTEMPTS;
+  });
+
+  test('ProviderHttpClient base class integrates with provider policies (#290)', () => {
+    const ProviderHttpClient = require('../../backend/src/utils/ProviderHttpClient');
+    const client = new ProviderHttpClient('stellar');
+    expect(client.providerName).toBe('stellar');
+
+    const policy = client.getOperationPolicy('getAccount');
+    expect(policy).toBeDefined();
+    expect(policy.circuitBreaker).toBeDefined();
+  });
 });

@@ -9,10 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Request correlation ID middleware (#275)**: Integrated UUID v4 request correlation ID middleware attached to all incoming API requests and outgoing responses (`X-Request-ID` and `X-Correlation-ID`), propagating across logs via `AsyncLocalStorage`, outbound HTTP calls, and BullMQ background queue jobs.
-- **Payment error taxonomy (#274)**: Defined a structured, machine-readable error taxonomy in `docs/error-codes.md` and registered `x-error-codes` extension in OpenAPI configuration (`swagger.js`) mapping status, retryability, and safe message templates.
-- **Frontend contract tests against OpenAPI (#273)**: Added OpenAPI spec validation and contract tests in `tests/apiContractTests.test.js` validating schema responses and error taxonomy against canonical fixtures.
-- **Bundle size budget & gzip tracking (#272)**: Added 200KB gzip threshold enforcement to `scripts/bundle-budget.js` with per-route gzip reporting in the CI bundle analysis summary.
+- **Response envelope versioning & compatibility testing (#298)**: Canonicalized `{ data, meta, error }` response envelopes, added `X-API-Version` response header across all endpoints, and established envelope shape test coverage in `tests/responseEnvelopeCompatibility.test.js`.
+- **Node.js dependency version compatibility matrix & update policy (#297)**: Published `docs/compatibility-matrix.md` and `docs/dependency-update-policy.md`. Pinned all direct production dependencies to exact versions in `backend/package.json`, and added `check:deps` audit script in root `package.json`.
+- **Centralized provider timeout & retry policy registry (#290)**: Extended `providerPolicyRegistry.js` with per-provider circuit-breaker configs and environment-variable policy overrides (`PROVIDER_<NAME>_TIMEOUT_MS`, `PROVIDER_<NAME>_MAX_ATTEMPTS`). Introduced `ProviderHttpClient` base class for external integrations and startup policy logging.
+- **Frontend analytics event schema (#270)**: Defined strict TypeScript union types in `analyticsEvents.d.ts`, documented event definitions and privacy rules in `docs/analytics-events.md`, and stamped `schemaVersion: "1.0.0"` onto all outgoing analytics payloads.
+
+### Dependencies
+
+- **Production dependencies pinned (#297)**: All 28 direct backend production dependencies (`@stellar/stellar-sdk`, `express`, `mongoose`, `ioredis`, `bullmq`, `axios`, etc.) are now pinned to exact semantic versions without loose ranges to ensure deterministic, reproducible deployments.
 
 - **Migrations 019–025 documentation (#1388)**: CHANGELOG and `docs/migrations.md` previously had no record of what migrations `019` through `025` do. Documented here so operators upgrading can tell what will run before they run `npm run migrate`:
   - **`019_add_reminder_time_window`** — Backfills `schools.settings.reminderTimeWindow` to `{ startHour: 8, endHour: 18 }` for any school missing it. Data-only, no index changes. Safe during a rolling deploy; idempotent (`$exists: false` filter). No prerequisites.

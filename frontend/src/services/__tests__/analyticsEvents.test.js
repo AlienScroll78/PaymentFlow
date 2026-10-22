@@ -151,13 +151,20 @@ describe('track — adapter integration', () => {
     expect(calls[0].props).toHaveProperty('studentIdPrefix', 'STU');
   });
 
-  it('passes an empty object to the adapter when all properties are sensitive', () => {
+  it('passes an empty properties object (with schemaVersion) to the adapter when all properties are sensitive', () => {
     track(EVENTS.STUDENT_LOOKUP_SUBMITTED, {
       studentId: 'STU001',
       parentEmail: 'p@school.com',
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].props).toEqual({});
+    expect(calls[0].props).toHaveProperty('schemaVersion', '1.0.0');
+    expect(calls[0].props).not.toHaveProperty('studentId');
+    expect(calls[0].props).not.toHaveProperty('parentEmail');
+  });
+
+  it('includes schemaVersion in every tracked event payload (#270)', () => {
+    track(EVENTS.SYNC_TRIGGERED, { source: 'dashboard' });
+    expect(calls[calls.length - 1].props).toHaveProperty('schemaVersion', '1.0.0');
   });
 });
 

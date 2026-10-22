@@ -140,6 +140,11 @@ app.use(express.json({
 // Correlation ID must be resolved before requestLogger so the logger uses the
 // same ID that will be reflected in the response header.
 app.use(correlationIdMiddleware);
+const API_VERSION = process.env.API_VERSION || '1.0.0';
+app.use((req, res, next) => {
+  res.setHeader('X-API-Version', API_VERSION);
+  next();
+});
 app.use(requestLogger());
 
 // ── Cache-Control: no-store on auth and sensitive data routes ─────────────────
