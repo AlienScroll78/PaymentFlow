@@ -4,10 +4,12 @@ const Notification = require('../models/notificationModel');
 const logger = require('../utils/logger').child('InAppNotificationService');
 
 // How long to keep notifications (in milliseconds) — matches TTL index
-const NOTIFICATION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+// Issue #362: retain last 30 days of notifications per user
+const NOTIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /**
- * Create a new in-app notification for a school.
+ * Create a new in-app notification for a school and emit an SSE event
+ * so connected clients update their unread count in real time.
  *
  * @param {object} data
  * @param {string} data.schoolId     - Tenant scope (required)
@@ -36,6 +38,33 @@ async function createNotification(data) {
   });
 
   logger.info('In-app notification created', { schoolId, type, severity });
+
+  // Emit SSE event so connected clients update unread count in real time (Issue #362)
+  try {
+    const sseService = require('./sseService');
+    const unreadCount = await getUnreadCount(schoolId);
+    sseService.emit(schoolId, 'notification.created', {
+      notification: {
+        _id: notification._id,
+        type: notification.type,
+        severity: notification.severity,
+        title: notification.title,
+        message: notification.message,
+        deepLink: notification.deepLink,
+        read: notification.read,
+        createdAt: notification.createdAt,
+      },
+      unreadCount,
+    });
+  } catch (err) {
+    // SSE delivery is best-effort; do not fail the notification creation
+    logger.warn('SSE emit failed for notification.created', {
+      schoolId,
+      type,
+      error: err.message,
+    });
+  }
+
   return notification;
 }
 
@@ -116,7 +145,7 @@ async function getUnreadCount(schoolId) {
 }
 
 /**
- * Delete notifications older than 90 days for a school.
+ * Delete notifications older than 30 days for a school.
  * This is a backup to the MongoDB TTL index for cases where TTL cleanup lags.
  *
  * @param {string} schoolId

@@ -6,11 +6,15 @@ import SseDegradedBanner from "../components/SseDegradedBanner";
 import NetworkStatusBanner from "../components/NetworkStatusBanner";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
+import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 import { useTranslation } from "react-i18next";
 
 export default function PayFees() {
   const { t } = useTranslation();
   const verifyPaymentRef = useRef(null);
+  // #253 — pass the JWT expiry timestamp to PaymentForm so it can show a
+  // session-expiry warning toast 5 minutes before the token expires.
+  const { tokenExp } = useAdminAuthContext();
 
   const STEPS = [
     { n: "1", title: t("payFees.step1Title"), desc: t("payFees.step1Desc") },
@@ -62,7 +66,7 @@ export default function PayFees() {
 
         {/* Main content grid */}
         <div className="payfees-grid">
-          <PaymentForm isOnline={isOnline} wasOffline={wasOffline} />
+          <PaymentForm isOnline={isOnline} wasOffline={wasOffline} tokenExp={tokenExp} />
           <div ref={verifyPaymentRef}>
             <VerifyPayment />
           </div>

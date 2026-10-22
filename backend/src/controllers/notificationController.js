@@ -6,6 +6,12 @@ const {
   markAllAsRead,
   getUnreadCount,
 } = require('../services/inAppNotificationService');
+const {
+  getPreferences,
+  setPreferences,
+  NOTIFICATION_TYPES,
+  CHANNELS,
+} = require('../services/notificationPreferenceService');
 
 /**
  * GET /api/notifications
@@ -108,9 +114,92 @@ async function getUnreadCountHandler(req, res, next) {
   }
 }
 
+/**
+ * GET /api/notifications/preferences
+ *
+ * Returns all notification type preferences for the current user.
+ * Missing types are filled with defaults (channel: 'in-app', enabled: true).
+ *
+ * Response: { preferences: [{ type, channel, enabled }] }
+ */
+async function getPreferencesHandler(req, res, next) {
+  try {
+    const { schoolId } = req;
+    // Extract userId from the authenticated session (JWT payload has userId)
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        error: 'User ID is required to fetch notification preferences',
+        code: 'VALIDATION_ERROR',
+      });
+    }
+
+    const preferences = await getPreferences(schoolId, String(userId));
+    res.json({ preferences });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PUT /api/notifications/preferences
+ *
+ * Updates one or more notification type preferences for the current user.
+ *
+ * Body: { preferences: [{ type, channel, enabled? }] }
+ *
+ * Response: { preferences: [{ type, channel, enabled }] }
+ */
+async function updatePreferencesHandler(req, res, next) {
+  try {
+    const { schoolId } = req;
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        error: 'User ID is required to update notification preferences',
+        code: 'VALIDATION_ERROR',
+      });
+    }
+
+    const { preferences } = req.body;
+
+    if (!Array.isArray(preferences) || preferences.length === 0) {
+      return res.status(400).json({
+        error: 'preferences must be a non-empty array of { type, channel } objects',
+        code: 'VALIDATION_ERROR',
+      });
+    }
+
+    // Validate each preference entry
+    for (const pref of preferences) {
+      if (!pref.type || !NOTIFICATION_TYPES.includes(pref.type)) {
+        return res.status(400).json({
+          error: `Invalid notification type: ${pref.type}`,
+          code: 'VALIDATION_ERROR',
+        });
+      }
+      if (!pref.channel || !CHANNELS.includes(pref.channel)) {
+        return res.status(400).json({
+          error: `Invalid channel: ${pref.channel}. Must be one of: ${CHANNELS.join(', ')}`,
+          code: 'VALIDATION_ERROR',
+        });
+      }
+    }
+
+    const updated = await setPreferences(schoolId, String(userId), preferences);
+    res.json({ preferences: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getNotifications: getNotificationsHandler,
   markRead: markReadHandler,
   markAllRead: markAllReadHandler,
   getUnreadCount: getUnreadCountHandler,
+  getPreferences: getPreferencesHandler,
+  updatePreferences: updatePreferencesHandler,
 };
