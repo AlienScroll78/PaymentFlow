@@ -46,7 +46,7 @@ const APP_LAYOUT_ROUTES = [
   "/fees",
   "/fee-adjustments",
   "/audit-logs",
-  "/dead-letter",
+  "/retention",
   "/disputes",
   "/source-validation-rules",
   "/audit-logs",

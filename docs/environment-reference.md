@@ -78,8 +78,10 @@ All other backend variables are optional at startup unless a feature explicitly 
 | `REMINDER_INTERVAL_MS`, `REMINDER_COOLDOWN_HOURS`, `REMINDER_MAX_COUNT` | application defaults | internal | Operations | backend |
 | `RECONCILIATION_BATCH_SIZE`, `RECONCILIATION_DRIFT_THRESHOLD`, `RECONCILIATION_CHAIN_LOOKBACK_DAYS`, `RECONCILIATION_CHAIN_TOTAL_TTL_SEC` | 500, 0.5, 90, 300 | internal | Payments operator | backend |
 | `STUCK_PAYMENT_THRESHOLD_MS`, `STUCK_PAYMENT_RECONCILIATION_INTERVAL_MS`, `STUCK_PAYMENT_RECONCILIATION_MAX_BATCH` | application defaults | internal | Payments operator | backend |
-| `STUDENT_FEE_HISTORY_CAP`, `STUDENT_BALANCE_LOCK_TTL_MS`, `STUDENT_PII_RETENTION_DAYS` | 100, application default, 90 days | internal | Compliance / payments | backend |
-| `AUDIT_LOG_RETENTION_DAYS`, `AUDIT_LOG_TTL_DAYS`, `REMINDER_LOG_TTL_SECONDS` | 730 days, 730 days, 90 days | internal | Compliance | backend |
+| `STUDENT_FEE_HISTORY_CAP`, `STUDENT_BALANCE_LOCK_TTL_MS` | 100, application default | internal | Compliance / payments | backend |
+| `STUDENT_PII_RETENTION_DAYS`, `PAYMENT_MEMO_RETENTION_DAYS`, `AUDIT_LOG_RETENTION_DAYS` | 2555 days, 1825 days, 90 days | internal | Compliance | backend |
+| `DATA_RETENTION_INTERVAL_MS`, `DATA_RETENTION_AUTO_PURGE` | 86400000, false | internal | Compliance / Operations | backend |
+| `REMINDER_LOG_TTL_SECONDS` | 90 days | internal | Compliance | backend |
 | `WORKER_HEARTBEAT_GRACE_MS` | application default | internal | Operations | backend |
 | `DEFAULT_SCHOOL_ID`, `SEED_SCHOOL_ID`, `SEED_SCHOOL_SLUG`, `SEED_SCHOOL_NAME` | migration/seed defaults | restricted | Application operator | migrations, seed |
 

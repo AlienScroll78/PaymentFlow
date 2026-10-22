@@ -1134,6 +1134,7 @@ GET /api/audit-logs/recent
 Authorization: Bearer <token>
 X-School-ID: SCH-3F2A
 ```
+
 **Query parameters**
 
 | Parameter | Type | Description |
@@ -1141,6 +1142,18 @@ X-School-ID: SCH-3F2A
 | `limit` | number | Number of entries to return (default: `10`) |
 
 **Response `200`** — array of the most recent audit log entries.
+
+## Data Retention
+
+All endpoints require administrator authentication.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/admin/retention/preview` | Dry-run report of eligible records by category |
+| `POST /api/admin/retention/run` | Run a dry run or explicitly execute retention |
+| `GET /api/admin/retention/certificates?limit=50` | List recent immutable deletion certificates |
+
+`POST /api/admin/retention/run` accepts `{ "dryRun": true, "scopes": ["studentPii"] }`. `dryRun` defaults to `true`; set it to `false` only after reviewing the preview. Student PII is scrubbed after `STUDENT_PII_RETENTION_DAYS` (default 2555 days) following graduation, with soft-deleted legacy students measured from `deletedAt`. Payment memos are redacted after `PAYMENT_MEMO_RETENTION_DAYS` (default 1825 days), while payment history is retained. Audit logs are archived after `AUDIT_LOG_RETENTION_DAYS` (default 90 days) rather than deleted, preserving their hash chain.
 
 ---
 

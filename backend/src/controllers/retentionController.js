@@ -15,11 +15,18 @@ const logger = require('../utils/logger').child('RetentionController');
 async function runRetentionHandler(req, res) {
   const { dryRun = true, scopes } = req.body || {};
 
+  if (typeof dryRun !== 'boolean') {
+    return res.status(400).json({
+      errors: [{ field: 'dryRun', message: 'dryRun must be a boolean' }],
+      code: 'VALIDATION_ERROR',
+    });
+  }
+
   // Validate scopes if provided
   if (scopes !== undefined) {
-    if (!Array.isArray(scopes) || scopes.some((s) => !ALL_SCOPES.includes(s))) {
+    if (!Array.isArray(scopes) || scopes.length > ALL_SCOPES.length || scopes.some((s) => !ALL_SCOPES.includes(s))) {
       return res.status(400).json({
-        error: `Invalid scopes. Allowed values: ${ALL_SCOPES.join(', ')}`,
+        errors: [{ field: 'scopes', message: `Must contain at most ${ALL_SCOPES.length} valid scope names` }],
         code:  'VALIDATION_ERROR',
       });
     }
@@ -45,6 +52,22 @@ async function runRetentionHandler(req, res) {
   }
 }
 
+async function listDeletionCertificates(req, res) {
+  const rawLimit = Number(req.query.limit || 50);
+  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 200) {
+    return res.status(400).json({
+      errors: [{ field: 'limit', message: 'limit must be an integer from 1 to 200' }],
+      code: 'VALIDATION_ERROR',
+    });
+  }
+  const DataDeletionCertificate = require('../models/dataDeletionCertificateModel');
+  const certificates = await DataDeletionCertificate.find()
+    .sort({ purgedAt: -1, _id: -1 })
+    .limit(rawLimit)
+    .lean();
+  return res.status(200).json({ certificates, limit: rawLimit });
+}
+
 /**
  * GET /api/admin/retention/preview
  *
@@ -64,4 +87,4 @@ async function previewRetentionHandler(req, res) {
   }
 }
 
-module.exports = { runRetentionHandler, previewRetentionHandler };
+module.exports = { runRetentionHandler, previewRetentionHandler, listDeletionCertificates };

@@ -77,6 +77,7 @@ const updateStudentSchema = Joi.object({
     .messages({ 'string.max': '"class" must not exceed 100 characters' }),
   feeAmount:    Joi.number().positive().optional()
     .messages({ 'number.positive': '"feeAmount" must be a positive number' }),
+  graduatedAt:  Joi.date().iso().optional().allow(null),
   parentEmail:  Joi.string().email().max(254).optional().allow(null, '')
     .messages({ 'string.max': '"parentEmail" must not exceed 254 characters' }),
   parentPhone:  Joi.string().max(30).optional().allow(null, '')

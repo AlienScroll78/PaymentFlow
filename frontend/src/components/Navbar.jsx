@@ -27,9 +27,13 @@ const NAV_LINKS = [
   { href: "/webhooks",              i18nKey: "nav.webhooks",        requiredRole: "admin"  },
 ];
 
-// Keep legacy arrays for backward-compatibility
-const PUBLIC_LINKS = NAV_LINKS.filter(l => l.requiredRole === "public");
-const ADMIN_LINKS  = NAV_LINKS.filter(l => l.requiredRole === "admin");
+const ADMIN_LINKS = [
+  { href: "/fee-adjustments", i18nKey: "nav.feeRules" },
+  { href: "/audit-logs",      i18nKey: "nav.auditLogs" },
+  { href: "/disputes",        i18nKey: "nav.disputes" },
+  { href: "/webhooks",        i18nKey: "nav.webhooks" },
+  { href: "/retention",       i18nKey: "nav.retention" },
+];
 
 // Focusable elements we allow inside the mobile menu trap
 const FOCUSABLE_SELECTORS =
