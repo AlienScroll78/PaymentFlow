@@ -32,14 +32,7 @@ export const DEFAULT_BACKOFF_FACTOR = 1.5;
  * @param {number}   [options.initialInterval]  Initial poll interval (ms). Default 3000.
  * @param {number}   [options.maxInterval]      Backoff ceiling (ms). Default 30000.
  * @param {number}   [options.backoffFactor]    Failure backoff multiplier. Default 1.5.
- * @returns {{
- *   polling: boolean,
- *   lastUpdated: Date|null,
- *   lastCheckedSecondsAgo: number|null,
- *   error: string|null,
- *   consecutiveErrors: number,
- *   manualRefresh: () => void,
- * }}
+ * @returns {{ polling: boolean, lastUpdated: Date|null, error: string|null, consecutiveErrors: number }}
  */
 export function usePendingPaymentPoller({
   studentId,
@@ -114,11 +107,7 @@ export function usePendingPaymentPoller({
         consecutiveErrorsRef.current = 0;
         setConsecutiveErrors(0);
         setError(null);
-
-        const now = new Date();
-        lastUpdatedRef.current = now;
-        setLastUpdated(now);
-        setLastCheckedSecondsAgo(0);
+        setLastUpdated(new Date());
         setPolling(false);
 
         const payments = Array.isArray(data) ? data : (data?.payments ?? []);
@@ -217,7 +206,7 @@ export function usePendingPaymentPoller({
     };
   }, [enabled, studentId, poll, currentStatus, initialInterval]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { polling, lastUpdated, lastCheckedSecondsAgo, error, consecutiveErrors, manualRefresh };
+  return { polling, lastUpdated, error, consecutiveErrors };
 }
 
 export default usePendingPaymentPoller;
