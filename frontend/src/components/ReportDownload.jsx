@@ -10,16 +10,11 @@ import {
 import PageHero, { StatCard } from "./PageHero";
 import DateRangePicker from "./DateRangePicker";
 import { useTranslation } from "react-i18next";
-import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
-import { isRetryable } from "../utils/retryClassification";
-import { SkeletonDetailCard } from "./Skeleton";
-import useGridCellNavigation from "../hooks/useGridCellNavigation";
+import { useReportExport } from "../hooks/useReportExport";
 
 export default function ReportDownload() {
   const { t } = useTranslation();
-  const historyGridProps = useGridCellNavigation();
-  const classGridProps = useGridCellNavigation();
-  const dailyGridProps = useGridCellNavigation();
+  const { addJob, updateProgress, completeJob, failJob } = useReportExport();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate]     = useState("");
   const [className, setClassName] = useState("");
@@ -101,14 +96,18 @@ export default function ReportDownload() {
     if (studentId) params.studentId = studentId;
     if (paymentStatus) params.paymentStatus = paymentStatus;
 
-    const fallbackFilename =
-      startDate && endDate
-        ? `report-${startDate}_to_${endDate}.csv`
-        : "report-all-time.csv";
-    const reportUrl = getReportCsvUrl(params);
-    setError("");
-    setErrorRetryable(false);
-    setErrorOperation(null);
+    // Build a human-readable label for the tray job
+    const label = startDate && endDate
+      ? `Report ${startDate} → ${endDate}`
+      : className
+      ? `Report — ${className}`
+      : "Report export";
+
+    const filename = startDate && endDate
+      ? `report-${startDate}_to_${endDate}.csv`
+      : "report-all-time.csv";
+
+    const jobId = addJob({ label });
 
     try {
       setCsvLoading(true);
@@ -134,31 +133,20 @@ export default function ReportDownload() {
         });
       }
       const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
 
-      let job = await response.json();
-      const statusUrl = new URL(job.statusUrl, reportUrl).href;
-      while (job.status === "pending" || job.status === "processing") {
-        setDownloadStatus("Generating report...");
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const statusResponse = await fetch(statusUrl, {
-          credentials: "include",
-          signal: controller.signal,
-        });
-        if (!statusResponse.ok) throw new Error(t("reports.downloadError"));
-        job = await statusResponse.json();
-      }
-      if (job.status !== "completed" || !job.downloadUrl) {
-        throw new Error(job.error || t("reports.downloadError"));
-      }
+      // Notify the tray that the export is ready
+      completeJob({ id: jobId, blobUrl, filename });
 
-      const downloadUrl = new URL(job.downloadUrl, reportUrl);
-      downloadUrl.searchParams.set("format", "csv");
-      downloadFile(downloadUrl.href, fallbackFilename);
-      setDownloadStatus("Report ready; download started.");
+      // Also trigger the download immediately for users already on this page
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (err) {
-      // Surface an actionable message and ensure no stale loading state remains.
-      setErrorRetryable(isRetryable(err));
-      setErrorOperation("csv");
+      failJob({ id: jobId, error: err.message || t("reports.failedCsvUnknown") });
       setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
     } finally {
       downloadAbortRef.current = null;
