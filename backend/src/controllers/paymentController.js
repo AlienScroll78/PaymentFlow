@@ -189,7 +189,7 @@ async function createPaymentIntent(req, res, next) {
 async function submitTransaction(req, res, next) {
   try {
     const { xdr, paymentIntentId } = req.body;
-    if (!xdr) return res.status(400).json({ error: 'Missing xdr parameter' });
+    if (!xdr) return res.status(400).json({ error: 'Missing xdr parameter', code: 'MISSING_XDR' });
 
     const tx = new StellarSdk.Transaction(xdr, require('../config/stellarConfig').networkPassphrase);
     const transactionHash = tx.hash().toString('hex');
@@ -203,7 +203,7 @@ async function submitTransaction(req, res, next) {
 
     const normalizedHash = hashValidation.normalized;
     const memo = tx.memo.value ? tx.memo.value.toString() : null;
-    if (!memo) return res.status(400).json({ error: 'Transaction must include the student ID as a memo' });
+    if (!memo) return res.status(400).json({ error: 'Transaction must include the student ID as a memo', code: 'MISSING_MEMO' });
 
     // Issue #1035: Match the specific PENDING record via paymentIntentId when provided
     // to avoid misattribution if multiple PENDING records exist for the same memo.
@@ -235,7 +235,7 @@ async function submitTransaction(req, res, next) {
 
     if (!paymentRecord) {
       const studentObj = await Student.findOne({ schoolId: req.schoolId, studentId: memo });
-      if (!studentObj) return res.status(404).json({ error: 'Associated student not found in the database. Cannot process transaction.' });
+      if (!studentObj) return res.status(404).json({ error: 'Associated student not found in the database. Cannot process transaction.', code: 'STUDENT_NOT_FOUND' });
       paymentRecord = new Payment({ schoolId: req.schoolId, studentId: studentObj.studentId || memo, memo, amount: 0 });
     }
 
@@ -251,7 +251,8 @@ async function submitTransaction(req, res, next) {
       paymentRecord.status = 'FAILED';
       paymentRecord.suspicionReason = err.response?.data?.extras?.result_codes?.transaction ?? err.message;
       await paymentRecord.save();
-      return res.status(400).json({ error: 'Transaction submission failed', code: paymentRecord.suspicionReason });
+      logger.warn('[PaymentController] submitTransaction on-chain failure', { txHash: normalizedHash, suspicionReason: paymentRecord.suspicionReason });
+      return res.status(400).json({ error: 'Transaction submission failed', code: 'TX_SUBMISSION_FAILED' });
     }
 
     if (!txResponse.successful) {
@@ -401,7 +402,7 @@ async function verifyPayment(req, res, next) {
       const studentObj = await Student.findOne({ schoolId, studentId: studentStrId });
       if (!studentObj) {
         await audit.failure('Associated student not found', { txHash: normalizedHash, studentId: studentStrId });
-        return res.status(404).json({ error: 'Associated student not found. Cannot record transaction.' });
+        return res.status(404).json({ error: 'Associated student not found. Cannot record transaction.', code: 'STUDENT_NOT_FOUND' });
       }
 
       // Intents are a UX convenience; an expired intent must not block crediting (#848).

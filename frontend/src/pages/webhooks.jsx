@@ -3,6 +3,7 @@ import RequireAdmin from "../components/RequireAdmin";
 import PageHero from "../components/PageHero";
 import { IconAlertTriangle, IconCheck, IconX, IconPlus, IconRefresh } from "../components/Icons";
 import { useTranslation } from "react-i18next";
+import { formatRelative } from "../utils/dateTime";
 
 async function apiCall(method, path, body = null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -16,13 +17,7 @@ async function apiCall(method, path, body = null) {
 }
 
 function timeAgo(iso, t) {
-  if (!iso) return t("time.never");
-  const mins = Math.floor((Date.now() - new Date(iso)) / 60000);
-  if (mins < 1) return t("time.justNow");
-  if (mins < 60) return t("time.minutesAgo", { mins });
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return t("time.hoursAgo", { hrs });
-  return new Date(iso).toLocaleDateString();
+  return formatRelative(iso, t);
 }
 
 const EVENT_OPTIONS = [

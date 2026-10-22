@@ -1,422 +1,384 @@
-# Runbook: Investigating and Resolving Stuck Payments
+# Runbook: Stuck Payments
 
-**Component:** `stuckPaymentReconciliation`, `transactionPollingService`, `transactionQueue`, `paymentConfirmationStateMachine`
-**Severity:** high — a payment stuck in `SUBMITTED` or `PROCESSING` state means a parent has paid but their balance is not updated.
-**Closes:** [#319](https://github.com/onlyonee1/PaymentFlow/issues/319)
-
----
-
-## Overview
-
-A payment is considered "stuck" when it stays in `SUBMITTED` or `PROCESSING` status for longer than 15 minutes (configurable via `STUCK_PAYMENT_THRESHOLD_MS`, default `900000`). StellarEduPay has a built-in reconciliation scheduler (`stuckPaymentReconciliation.js`) that automatically re-queues stuck payments every 10 minutes, but there are failure scenarios the scheduler cannot self-heal: network partitions, bad memo, duplicate transaction hash collision, or a payment whose blockchain transaction was never confirmed.
-
-This runbook covers:
-1. How to detect stuck payments
-2. A decision tree for diagnosing the root cause
-3. Safe intervention options with risk levels and reversal procedures
-4. Escalation criteria
+**Audience:** Support and operations engineers  
+**Severity:** P2 (no funds lost; user-visible payment status is incorrect)  
+**Escalation path:** On-call backend engineer → Payment platform team → Stellar integration team
 
 ---
 
-## Definitions
+## Table of contents
 
-| Status | Meaning |
-|--------|---------|
-| `PENDING` | Payment record created; waiting for blockchain confirmation |
-| `SUBMITTED` | Transaction seen on Horizon; confirmation in progress |
-| `PROCESSING` | Transaction queued for internal verification |
-| `SUCCESS` | Payment confirmed and student balance updated |
-| `FAILED` | Payment could not be confirmed; permanent terminal state |
-
-A payment is **stuck** when it has been in `SUBMITTED` or `PROCESSING` for longer than `STUCK_PAYMENT_THRESHOLD_MS` (default 15 min).
-
----
-
-## Pre-Investigation Checklist
-
-Before intervening, gather these data points:
-
-- [ ] **Payment ID (`txHash`)** — from the parent's report, admin dashboard, or `GET /api/payments/:studentId`
-- [ ] **School ID (`schoolId`)** — from the payment record
-- [ ] **Student ID (`studentId`)** — from the payment record
-- [ ] **Timestamp** — when did the payment enter its current status?
-- [ ] **Current backend health** — `curl https://<api-host>/health`
-- [ ] **Retry queue depth** — `GET /api/admin/retry-queue` (requires admin JWT)
+1. [What is a stuck payment?](#1-what-is-a-stuck-payment)
+2. [Required permissions](#2-required-permissions)
+3. [Investigation: gather facts first](#3-investigation-gather-facts-first)
+4. [Decision tree](#4-decision-tree)
+5. [Safe remediation actions](#5-safe-remediation-actions)
+6. [Escalation criteria](#6-escalation-criteria)
+7. [Prohibited manual edits](#7-prohibited-manual-edits)
+8. [Audit requirements](#8-audit-requirements)
+9. [Post-incident checklist](#9-post-incident-checklist)
 
 ---
 
-## Decision Tree
+## 1. What is a stuck payment?
 
-```
-Payment stuck in SUBMITTED or PROCESSING?
-│
-├── Is the backend healthy? (/health → 200 ok)
-│   ├── NO  → See "Backend / Infrastructure Outage" section
-│   └── YES → Continue
-│
-├── Is the txHash visible on Stellar Horizon?
-│   ├── NO  → Transaction was never broadcast; go to "Ghost Transaction"
-│   └── YES → Continue
-│
-├── Does Horizon show the transaction as successful?
-│   ├── NO (failed/expired) → Go to "Blockchain Transaction Failed"
-│   └── YES → Continue
-│
-├── Does the memo on the blockchain match the studentId?
-│   ├── NO  → Go to "Memo Mismatch"
-│   └── YES → Continue
-│
-├── Is the destination address the school's current stellarAddress?
-│   ├── NO  → Go to "Wrong Destination"
-│   └── YES → Continue
-│
-├── Is the retry queue depth growing? (/api/admin/retry-queue → waiting > 50)
-│   ├── YES → Queue backpressure; go to "Queue / Worker Failure"
-│   └── NO  → Go to "Manual Reconciliation Trigger"
-```
+A payment is **stuck** when its status in MongoDB has not progressed for an
+unexpectedly long time. The most common cases are:
+
+| Symptom | Likely cause |
+|---------|-------------|
+| Status `pending` for > 15 minutes | Stellar Horizon unreachable; retry worker backlogged |
+| Status `pending_verification` for > 30 minutes | Retry exhausted; landed in dead-letter backlog |
+| Status `submitted` for > 10 minutes | Stellar transaction not confirmed or failed |
+| Status `manual_review` | Previous automated decision was ambiguous; requires human review |
+| Status `failed` but Horizon shows confirmed | Status not updated after successful retry |
+| Status `confirmed` but student balance not updated | Post-confirmation hook failure |
+
+The retry schedule for failed verifications is:
+- Attempt 1: 1 minute after failure
+- Attempt 2: 5 minutes after attempt 1
+- Attempt 3: 15 minutes after attempt 2
+- After 3 attempts: moved to dead-letter queue (status: `dead_letter`)
+
+For the BullMQ backend (Redis): up to `MAX_RETRY_ATTEMPTS` (default 10) with exponential backoff + jitter.
 
 ---
 
-## Step 1: Verify Backend and Queue Health
+## 2. Required permissions
+
+| Action | Minimum role |
+|--------|-------------|
+| Read payment records, Prometheus metrics | `support` |
+| Query MongoDB directly (read-only) | `db-reader` |
+| Trigger a payment sync (`POST /api/payments/sync`) | `admin` JWT |
+| Re-drive a dead-letter job | `admin` JWT |
+| Update payment status via admin API | `admin` JWT |
+| Direct MongoDB write | **Backend platform team only** — see §7 |
+| Stellar Horizon queries | No credentials required (public API) |
+
+Do not use elevated permissions for initial triage. Read-only queries first.
+
+---
+
+## 3. Investigation: gather facts first
+
+> **Rule:** Never modify any record until you have confirmed the Stellar network
+> state. An incorrect update cannot be undone without a backup restore.
+
+### 3.1 Identify the affected payment
+
+Collect the following before taking any action:
+
+- **Payment ID** (MongoDB `_id`)
+- **Transaction hash** (`txHash`) — the Stellar transaction hash
+- **School ID** (`schoolId`) and **Student ID** (`studentId`)
+- **Current status** in MongoDB
+- **Amount** and **asset** (`assetCode`)
+- **`createdAt`** and **`updatedAt`** timestamps
+- **Last error** (from retry record or dead-letter entry)
+
+Query via the admin API (requires `admin` JWT):
 
 ```bash
-# Health check
-curl -s https://<api-host>/health | jq .
+# List payments in pending or manual_review status
+GET /api/payments/pending
 
-# Retry queue depth (requires admin JWT)
-curl -s https://<api-host>/api/admin/retry-queue \
-  -H "Authorization: Bearer <admin-jwt>" | jq .
-
-# Check recent error logs
-docker compose logs --tail=200 backend 2>&1 | grep -i "error\|stuck\|reconcil"
+# List payments with specific status for debugging
+# Use the Grafana dashboard → Payments → Filter by status
 ```
 
-**Expected output:** `{ "status": "ok" }` and queue depth under 50. If the backend returns `503` or the queue depth is over 200, this is an infrastructure incident — escalate immediately (see Escalation section).
+Or from MongoDB (read-only, `db-reader` role):
 
----
-
-## Step 2: Inspect the Payment Record
-
-### MongoDB query
-
-```javascript
-// Connect to MongoDB
-mongosh "$MONGO_URI"
-
-// Find the stuck payment by txHash
-db.payments.findOne({ txHash: "<TX_HASH>" }, {
-  txHash: 1, status: 1, confirmationState: 1,
-  studentId: 1, schoolId: 1, memo: 1, senderAddress: 1,
-  submittedAt: 1, confirmedAt: 1, createdAt: 1
-})
-
-// Find all stuck payments older than 15 minutes
+```js
+// Find payments stuck in pending for > 30 min
 db.payments.find({
-  status: { $in: ["SUBMITTED", "PROCESSING"] },
-  submittedAt: { $lt: new Date(Date.now() - 900000) },
-  deletedAt: null
-}).sort({ submittedAt: 1 })
+  status: { $in: ['pending', 'pending_verification', 'submitted'] },
+  updatedAt: { $lt: new Date(Date.now() - 30 * 60 * 1000) }
+}).sort({ updatedAt: 1 }).limit(20)
+
+// Find dead-lettered verification jobs
+db.pendingverifications.find({ status: 'dead_letter' }).sort({ updatedAt: -1 }).limit(20)
+
+// Find a specific payment by txHash
+db.payments.findOne({ txHash: '<hash>' })
 ```
 
-### Via admin API
+### 3.2 Check Stellar Horizon directly
+
+**This is the authoritative source of truth.** Always check Horizon before any remediation.
 
 ```bash
-# List pending verifications
-curl -s "https://<api-host>/api/payments/pending?page=1&limit=20" \
-  -H "Authorization: Bearer <admin-jwt>" | jq .
+# Testnet
+curl "https://horizon-testnet.stellar.org/transactions/<txHash>"
+
+# Mainnet
+curl "https://horizon.stellar.org/transactions/<txHash>"
+```
+
+Fields to check in the response:
+
+| Field | What to look for |
+|-------|-----------------|
+| `successful` | `true` = transaction confirmed; `false` = transaction failed |
+| `created_at` | When the transaction was ledger-confirmed |
+| `memo` | Should contain the student ID for automatic matching |
+| `operations` (via `/transactions/<hash>/operations`) | Payment amount, asset, source, destination |
+
+**If Horizon returns 404:** the transaction hash does not exist on the network.
+Do not mark the payment as confirmed. See §4.
+
+**If Horizon is timing out or returning 5xx:** the network may be degraded.
+Do not take any irreversible action until Horizon responds. See §6 (escalation).
+
+### 3.3 Check retry queue depth
+
+```bash
+# Admin API — retry queue status
+GET /api/admin/retry-queue
+Authorization: Bearer <admin-jwt>
+
+# Prometheus metric (Grafana dashboard or direct query)
+queue_depth{queue="transaction-processing"}
+queue_failed{queue="transaction-dead-letter-queue"}
+pending_verification_backlog{status="pending"}
+pending_verification_backlog{status="dead_letter"}
+```
+
+A large backlog usually indicates a Horizon outage or Redis connectivity issue
+rather than a single stuck payment. Check the health endpoint and system alerts.
+
+```bash
+GET /health
+```
+
+### 3.4 Check application logs
+
+```bash
+# Docker Compose
+docker compose logs --since=1h backend | grep '<txHash>'
+
+# Kubernetes
+kubectl logs -l app=backend --since=1h | grep '<txHash>'
+```
+
+Look for:
+- `Stellar network error` — Horizon connectivity issue
+- `DUPLICATE_TX` — payment already recorded; status may be stale
+- `MISSING_MEMO` — transaction memo did not match any student
+- `INVALID_DESTINATION` — payment went to wrong wallet
+- `AMOUNT_TOO_LOW` / `AMOUNT_TOO_HIGH` — fee validation failure
+- `webhook retry exhausted` — downstream notification failed (not a payment issue)
+
+---
+
+## 4. Decision tree
+
+Work through this tree in order. Do not skip steps.
+
+```
+Is Horizon returning the transaction?
+│
+├── NO (404)
+│   ├── Was money actually sent? (confirm with the payer)
+│   │   ├── YES → Transaction may be pending in mempool; wait 10 min and re-query
+│   │   └── NO  → Mark payment as FAILED; document reason in audit log
+│   └── Was it a testnet transaction submitted to mainnet (or vice versa)?
+│       └── YES → Mark FAILED, notify user of network mismatch
+│
+├── YES, transaction is confirmed on Horizon (successful: true)
+│   ├── MongoDB status = confirmed?
+│   │   └── YES → No action needed; check if downstream systems (webhook, email) are the issue
+│   ├── MongoDB status = pending / pending_verification / submitted?
+│   │   └── Trigger a payment sync (see §5.1) — safe, idempotent
+│   ├── MongoDB status = failed?
+│   │   └── Status is incorrect — escalate to backend team for API-level correction (see §5.3)
+│   └── MongoDB status = manual_review?
+│       └── Verify amount matches expected fee, then clear to confirmed (see §5.2)
+│
+└── YES, transaction is on Horizon but NOT successful (successful: false)
+    ├── MongoDB status = failed? → Correct; no action needed
+    └── MongoDB status = anything else? → Trigger sync (§5.1); verify it transitions to failed
 ```
 
 ---
 
-## Step 3: Check Stellar Horizon
+## 5. Safe remediation actions
+
+### 5.1 Trigger a payment sync (safe — read from Stellar, no destructive writes)
+
+This re-polls the Stellar Horizon API for the school's wallet and processes any
+unrecorded transactions. It is **idempotent** — it will not double-record a
+payment already in MongoDB.
+
+**Requires:** `admin` JWT
 
 ```bash
-# Check transaction by hash
-curl -s "https://horizon.stellar.org/transactions/<TX_HASH>" | jq '{
-  id, successful, created_at,
-  memo, memo_type,
-  source_account
-}'
-
-# Check the destination account operations
-curl -s "https://horizon.stellar.org/transactions/<TX_HASH>/operations" | \
-  jq '.records[] | { type, from, to, amount, asset_type }'
+POST /api/payments/sync
+Authorization: Bearer <admin-jwt>
+Content-Type: application/json
+{}
 ```
 
-For **testnet** use `https://horizon-testnet.stellar.org`.
+After the sync completes, re-query the payment status. If it has not changed,
+the transaction may not yet be confirmed on Stellar, or the memo may not match.
+
+### 5.2 Re-drive a dead-letter verification job
+
+If a payment verification job exhausted all retries and landed in the dead-letter
+queue, an admin can re-trigger it once the underlying issue (e.g. Horizon outage)
+is resolved.
+
+**Requires:** `admin` JWT
+
+```bash
+# List dead-letter entries
+GET /api/admin/retry-queue
+Authorization: Bearer <admin-jwt>
+
+# Re-drive a specific dead-letter job
+POST /api/admin/retry-queue/<jobId>/retry
+Authorization: Bearer <admin-jwt>
+```
+
+For the MongoDB retry backend, equivalent:
+
+```js
+// Read-only query first — confirm the record exists
+db.pendingverifications.findOne({ txHash: '<hash>', status: 'dead_letter' })
+
+// Escalate to backend team to reset status to 'pending' via admin API
+```
+
+### 5.3 Request an admin status correction
+
+If a payment's MongoDB status is demonstrably wrong (e.g. `failed` when Horizon
+confirms `successful: true`) and the sync in §5.1 did not resolve it, escalate
+to the backend platform team.
+
+Provide:
+1. The payment `_id` and `txHash`
+2. Evidence from Horizon (URL + response JSON, with no PII)
+3. Current MongoDB status
+4. Expected status and why
+
+The backend team will update via an authenticated admin API call, not a direct
+database write (see §7).
+
+### 5.4 Acknowledge a manual-review payment
+
+Payments in `manual_review` status were flagged by the fraud-detection or
+fee-validation layer. Before clearing them:
+
+1. Confirm the Horizon transaction is `successful: true` (§3.2).
+2. Confirm the amount matches the student's expected fee (within configured tolerance).
+3. Confirm the `memo` matches the student ID in the payment record.
+4. Confirm no dispute has been opened for this payment.
+
+If all checks pass, the backend team can clear the payment to `confirmed` via
+the admin API. Document the approval in the audit log (§8).
 
 ---
 
-## Scenario Playbooks
+## 6. Escalation criteria
 
-### Scenario A: Auto-Reconciliation Has Not Run Yet
+Escalate to the backend platform team if:
 
-**Symptoms:** Payment is 15–30 min old, backend is healthy, Horizon shows success, queue is normal.
+- A single payment has been stuck for > 2 hours and a sync did not resolve it.
+- More than 5 payments from the same school are stuck simultaneously.
+- Horizon is returning `successful: true` but the status remains `failed` after a sync.
+- The dead-letter queue depth is growing faster than 10 jobs/hour.
+- Any payment record shows inconsistent data (e.g. `txHash` in MongoDB does not match Horizon).
+- You are being asked to write directly to MongoDB (§7).
 
-**Resolution:** The reconciliation scheduler runs every 10 minutes. Wait one full cycle. If it does not resolve within 20 minutes, manually trigger reconciliation (Scenario E).
+Escalate to the Stellar integration team if:
 
-**Risk:** None — read-only wait.
+- Horizon itself is unavailable for > 30 minutes (check https://status.stellar.org).
+- Horizon returns `successful: true` but the transaction memo cannot be decoded.
+- Payments to the correct wallet are not appearing on Horizon.
 
----
+When escalating, include:
 
-### Scenario B: Ghost Transaction (Not on Horizon)
-
-**Symptoms:** txHash is not found on Horizon at all.
-
-**Cause:** The parent's wallet submitted a transaction that was never broadcast, or the memo pointed to an incorrect address.
-
-**Resolution (⚠️ REQUIRES DUAL APPROVAL):**
-
-1. Confirm with the parent that they have a Stellar transaction confirmation in their wallet app.
-2. If the parent has a valid transaction but the memo/destination was wrong, see Scenario D (Memo Mismatch).
-3. If no valid Stellar transaction exists, **manually fail the payment:**
-
-```javascript
-// ⚠️ DUAL APPROVAL REQUIRED — log the approving admin names before running
-// Risk: IRREVERSIBLE. The payment will be permanently marked FAILED.
-// Reversal: Create a new payment record manually if the parent later provides a valid txHash.
-
-db.payments.updateOne(
-  { txHash: "<TX_HASH>", status: { $in: ["SUBMITTED", "PROCESSING"] } },
-  {
-    $set: {
-      status: "FAILED",
-      confirmationState: "failed",
-      confirmationStatus: "failed",
-      updatedAt: new Date()
-    }
-  }
-)
-```
-
-4. Notify the parent that their payment was not found on the blockchain.
-5. Write an audit log entry manually:
-
-```javascript
-db.auditlogs.insertOne({
-  schoolId: "<SCHOOL_ID>",
-  action: "payment_manually_failed",
-  performedBy: "<your-admin-email>",
-  details: {
-    txHash: "<TX_HASH>",
-    reason: "Transaction not found on Stellar Horizon after investigation",
-    approvedBy: "<second-admin-email>",
-    incidentRef: "<incident-ID>"
-  },
-  createdAt: new Date()
-})
-```
+- The incident record number
+- A list of affected payment IDs, school IDs, and transaction hashes (no PII)
+- Timeline of events with log excerpts
+- What was already attempted
 
 ---
 
-### Scenario C: Blockchain Transaction Failed
+## 7. Prohibited manual edits
 
-**Symptoms:** Horizon returns `"successful": false` for the transaction.
+The following actions **must not be taken** without explicit authorisation from
+the backend platform team and a documented change request:
 
-**Cause:** The transaction was rejected by Stellar (insufficient balance, bad auth, no trustline, etc.).
+| Prohibited action | Why |
+|-------------------|-----|
+| Direct `db.payments.updateOne(...)` or `db.payments.findOneAndUpdate(...)` | Bypasses audit log, status machine validation, and webhook notifications |
+| Manually setting `status: 'confirmed'` without Horizon confirmation | Could result in unearned fee credit |
+| Deleting a payment record | Destroys audit trail; may create orphaned student balance |
+| Modifying `txHash` | Breaks idempotency checks; may allow double-payment |
+| Resetting `attemptCount` to 0 without investigating the root failure | May re-trigger the same error in a loop |
+| Modifying `studentId` or `schoolId` on an existing payment | Violates tenant isolation; may misattribute fees |
+| Running `mongorestore --drop` against the production database during a live incident | Irreversible; destroys all records written since the backup |
 
-**Resolution:**
-
-1. Determine the specific Horizon error code:
-
-```bash
-curl -s "https://horizon.stellar.org/transactions/<TX_HASH>" | \
-  jq '.result_codes'
-```
-
-2. Trigger a manual verification which will detect the failure and mark the payment `FAILED`:
-
-```bash
-# Trigger re-verification
-curl -X POST "https://<api-host>/api/payments/verify" \
-  -H "Authorization: Bearer <admin-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{ "txHash": "<TX_HASH>", "schoolId": "<SCHOOL_ID>" }'
-```
-
-3. If the API returns an error, manually set the payment to `FAILED` using the MongoDB command from Scenario B (dual approval required).
-
-**Risk:** Low — triggering verification is idempotent. Manual status update is irreversible.
+If you believe a prohibited action is necessary, stop and escalate. The platform
+team will assess whether an API-level correction is possible, or whether a
+controlled maintenance window is required.
 
 ---
 
-### Scenario D: Memo Mismatch
+## 8. Audit requirements
 
-**Symptoms:** Transaction is successful on Horizon, but the memo does not match the `studentId` format or is blank.
+Every remediation action must be recorded. For each action taken:
 
-**Cause:** Parent entered the wrong memo, or the memo was truncated.
+1. **Open an audit entry** via the admin audit log endpoint before making changes:
+   ```bash
+   # All state changes made via the admin API are automatically audit-logged.
+   # For manual investigation steps, create an incident record externally.
+   ```
 
-**Resolution (⚠️ REQUIRES DUAL APPROVAL):**
+2. **Record the following** in the incident management system:
+   - Incident ID and time opened
+   - Operator name and role
+   - Affected payment IDs (no PII — omit student names, parent contact info)
+   - Horizon evidence (URL queried, `successful` field value, `created_at`)
+   - Action taken and API endpoint called
+   - Before and after payment status
+   - Time action completed and operator who verified it
 
-1. Confirm the correct student by cross-referencing the payment amount and school wallet address.
-2. If the student can be positively identified:
+3. **For any payment moved to `confirmed`:** retain the Horizon response as an
+   attachment in the incident record. This is required for financial audit purposes.
 
-```bash
-# Trigger sync — the service will try to match the payment
-curl -X POST "https://<api-host>/api/payments/sync" \
-  -H "Authorization: Bearer <admin-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{ "schoolId": "<SCHOOL_ID>" }'
-```
-
-3. If auto-match fails (memo is genuinely wrong), **do not update the memo field**. Instead, create a corrected payment record as a new verified entry and mark the original as `FAILED` with reason `"memo_mismatch_manually_resolved"`.
-
-**Risk:** Medium — dual approval required before any manual record manipulation.
-
----
-
-### Scenario E: Manual Reconciliation Trigger
-
-**Symptoms:** Backend is healthy, transaction is confirmed on Horizon, memo is correct, but the payment is still stuck after two reconciliation cycles.
-
-**Resolution:**
-
-```bash
-# Trigger reconciliation via API
-curl -X POST "https://<api-host>/api/payments/sync" \
-  -H "Authorization: Bearer <admin-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{ "schoolId": "<SCHOOL_ID>" }'
-```
-
-If the API sync does not resolve it, re-queue via the reconciliation endpoint:
-
-```bash
-# Re-verify specific transaction
-curl -X POST "https://<api-host>/api/payments/verify" \
-  -H "Authorization: Bearer <admin-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{ "txHash": "<TX_HASH>", "schoolId": "<SCHOOL_ID>" }'
-```
-
-**Risk:** Low — idempotent operation. Can be safely retried.
-**Reversal:** Not needed; no state changes unless the payment legitimately confirms.
+4. **Automated audit log:** all changes made via the admin API are written to
+   the `auditlogs` collection automatically. Verify the entry was created:
+   ```js
+   // Read-only check — db-reader role
+   db.auditlogs.findOne({ resourceId: '<paymentId>' }, { _id: 1, action: 1, actor: 1, ts: 1 })
+   ```
 
 ---
 
-### Scenario F: Queue / Worker Failure
+## 9. Post-incident checklist
 
-**Symptoms:** Retry queue depth growing (`waiting > 200`), many payments stuck simultaneously, worker logs show errors.
+After the stuck payment is resolved:
 
-**Resolution:**
-
-1. Check worker health:
-
-```bash
-docker compose logs --tail=500 backend 2>&1 | grep -i "worker\|bull\|queue"
-```
-
-2. If BullMQ worker is down, restart the backend:
-
-```bash
-docker compose restart backend
-```
-
-3. If Redis is unreachable, the system should have fallen back to MongoDB retry backend automatically. Check:
-
-```bash
-docker compose logs backend 2>&1 | grep -i "redis\|fallback\|mongo.*retry"
-```
-
-4. After restart, monitor the queue depth decreasing:
-
-```bash
-# Poll every 30 seconds
-watch -n 30 'curl -s https://<api-host>/api/admin/retry-queue \
-  -H "Authorization: Bearer <admin-jwt>" | jq .waiting'
-```
-
-**Risk:** Medium — restarting the backend will drain in-flight requests gracefully (SIGTERM handling). Any payment currently being processed will be retried on restart.
+- [ ] Payment status in MongoDB matches Horizon (`successful` field)
+- [ ] Student fee balance is updated correctly
+- [ ] Webhook delivery was triggered (check delivery history: `GET /api/webhook-deliveries`)
+- [ ] Email receipt was sent (check `emaildeliveries` collection or admin email log)
+- [ ] Dispute, if any, was resolved or still correctly open
+- [ ] Audit log entry created for each action taken
+- [ ] Retry queue depth has returned to baseline (Prometheus `queue_depth` alert cleared)
+- [ ] Root cause documented in the incident record
+- [ ] If the root cause was a Horizon outage: confirm Horizon status page shows all systems operational before closing
+- [ ] If the root cause was a Redis/queue issue: confirm `GET /health` returns `{ "status": "ok" }` for all subsystems
+- [ ] Alert thresholds reviewed — if the alert fired too late, update Prometheus alert rules
 
 ---
 
-### Scenario G: Backend / Infrastructure Outage
+## Related documentation
 
-**Symptoms:** `/health` returns `503` or is unreachable.
-
-**Resolution:**
-
-1. This is a full incident — see `docs/operator-runbooks.md` (General Incident Steps).
-2. **Do not** manually modify payment records while the backend is unhealthy — you may create inconsistencies the auto-reconciler would otherwise resolve.
-3. Once the backend recovers, the stuck payment reconciliation scheduler will automatically re-queue payments that have been stuck longer than 15 minutes.
-
----
-
-## Intervention Reference
-
-| Intervention | Risk | Reversible | Dual Approval |
-|---|---|---|---|
-| Trigger `POST /api/payments/sync` | Low | Yes (idempotent) | No |
-| Trigger `POST /api/payments/verify` | Low | Yes (idempotent) | No |
-| Restart backend container | Medium | Yes | No |
-| Manual `FAILED` status in MongoDB | **HIGH** | **NO** | **YES — required** |
-| Manual `SUCCESS` status in MongoDB | **CRITICAL** | **NO** | **YES — required + incident log** |
-| Delete payment record | **CRITICAL** | **NO** | **NEVER — use soft delete** |
-
-> **⚠️ Setting `status: "SUCCESS"` manually bypasses all fee validation, idempotency checks, student balance update, and audit trail.** This must never be done without creating an explicit audit log entry and getting sign-off from a second admin. The strongly preferred path is to re-queue the payment and let the verification pipeline confirm it.
-
----
-
-## Example Log Searches
-
-```bash
-# Find all log lines for a specific txHash
-docker compose logs backend 2>&1 | grep "<TX_HASH>"
-
-# Find stuck payment reconciliation runs
-docker compose logs backend 2>&1 | grep -i "stuck\|reconcil"
-
-# Find errors from the last hour
-docker compose logs --since=1h backend 2>&1 | grep '"level":"error"'
-
-# Find queue re-queuing events
-docker compose logs backend 2>&1 | grep -i "re-queue\|requeue"
-```
-
-If using structured JSON logs (production), use `jq`:
-
-```bash
-docker compose logs backend 2>&1 | \
-  grep '"txHash":"<TX_HASH>"' | \
-  jq '{ts, level, msg, status, correlationId}'
-```
-
----
-
-## Prometheus / Grafana Checks
-
-| Metric | Alert Threshold | What to Look For |
-|--------|----------------|------------------|
-| `payment_processing_duration_seconds` (p95) | > 10s | Elevated latency in verification |
-| `bullmq_queue_waiting_total` | > 50 (warn), > 200 (crit) | Queue backpressure |
-| `stuck_payments_requeued_total` | Sudden spike | Batch of payments were stuck |
-| `payment_status_transitions_total{to="FAILED"}` | Spike | Payments failing in bulk |
-
----
-
-## Escalation
-
-Escalate to the **Stellar / provider integration team** when:
-
-1. Multiple payments are stuck simultaneously across more than one school
-2. Horizon API is returning errors or rate-limiting (`curl https://horizon.stellar.org` returns 5xx)
-3. A payment has been stuck for more than 1 hour and all standard interventions have failed
-4. Any scenario requiring manual `SUCCESS` status — this always requires a second approver
-
-**Escalation contact:** File a P1 incident in your incident tracker, assign `team/stellar-integration`, and attach:
-- The stuck payment's `txHash`
-- The Horizon transaction URL: `https://stellar.expert/explorer/testnet/tx/<TX_HASH>`
-- The backend log excerpt for the payment
-- The retry queue depth at time of escalation
-
----
-
-## Related Documents
-
-- Stuck payment reconciliation service: [`backend/src/services/stuckPaymentReconciliation.js`](../../backend/src/services/stuckPaymentReconciliation.js)
-- Transaction queue: [`backend/src/queue/transactionQueue.js`](../../backend/src/queue/transactionQueue.js)
-- Payment state machine: [`backend/src/services/paymentConfirmationStateMachine.js`](../../backend/src/services/paymentConfirmationStateMachine.js)
-- Payment status constants: [`backend/src/constants/paymentStatus.js`](../../backend/src/constants/paymentStatus.js)
-- General operator runbooks: [`docs/operator-runbooks.md`](../operator-runbooks.md)
-- Idempotency design: [`docs/idempotency-payment-verification.md`](../idempotency-payment-verification.md)
-- Retry backends: [`docs/retry-backends.md`](../retry-backends.md)
+- [`docs/operator-runbooks.md`](../operator-runbooks.md) — general incident steps, Redis/queue runbook, Horizon outage runbook
+- [`docs/retry-backends.md`](../retry-backends.md) — BullMQ vs MongoDB backend guarantee matrix
+- [`docs/architecture.md`](../architecture.md) — payment pipeline data flow
+- [`docs/stellar-integration.md`](../stellar-integration.md) — Horizon API details, memo field, asset types
+- Prometheus alert rules: `monitoring/alerts/queue_backpressure.yml`, `monitoring/alerts/transaction_queue.yml`

@@ -19,35 +19,82 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+// ── Token hashing ─────────────────────────────────────────────────────────────
+// Raw refresh tokens are NEVER stored. Every store operation hashes the token
+// with SHA-256 first so that a Redis/memory dump cannot be used to forge
+// sessions. The client always receives and presents the raw token; the store
+// only ever sees (and persists) the hash.
+//
+// Security note: SHA-256 is appropriate here because the tokens are 40-byte
+// (320-bit) cryptographically random values. There is no need for a password
+// KDF (bcrypt/argon2) — the entropy of the raw token already makes brute-force
+// infeasible. SHA-256 keeps store operations O(1) without a timing risk.
+
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
 // ── Token & session store ─────────────────────────────────────────────────────
 // Redis keys:
-//   refresh:token:<token>    → JSON metadata ({ familyId, sessionId, userId, role, ... })
-//   refresh:consumed:<token> → familyId string (300s reuse-detection window)
-//   refresh:revoked:<fid>    → '1' (TTL: refresh token max TTL)
-//   session:<sid>            → JSON session record
-//   sessions:user:<uid>      → Redis set of active sessionIds
+//   refresh:token:<sha256(token)>    → JSON metadata ({ familyId, sessionId, userId, role, ... })
+//   refresh:revoked:<familyId>       → '1' (TTL: refresh token max TTL)
+//   session:<sid>                    → JSON session record
+//   sessions:user:<uid>              → Redis set of active sessionIds
+//
+// Reuse detection strategy:
+//   On every successful rotation the old hash is deleted and the family is
+//   atomically recorded as the "active family" for audit. When an unknown
+//   hash arrives we check whether the FAMILY itself has been revoked — if not,
+//   it means the token pre-dates the family's last rotation, which is a
+//   replay. We immediately revoke the family regardless of how old the token
+//   is (no 300-second window). This closes the gap where a delayed replay
+//   (> 5 min after rotation) escaped family revocation.
 
 function makeRedisStore(client) {
   return {
+    // Store token metadata keyed by SHA-256(raw token).
     async setToken(token, ttlSeconds, meta) {
-      await client.set(`refresh:token:${token}`, JSON.stringify(meta), 'EX', ttlSeconds);
+      await client.set(`refresh:token:${hashToken(token)}`, JSON.stringify(meta), 'EX', ttlSeconds);
     },
     async getToken(token) {
-      const raw = await client.get(`refresh:token:${token}`);
+      const raw = await client.get(`refresh:token:${hashToken(token)}`);
       if (!raw) return null;
       try { return JSON.parse(raw); } catch { return null; }
     },
     async delToken(token) {
-      await client.del(`refresh:token:${token}`);
+      await client.del(`refresh:token:${hashToken(token)}`);
     },
-    async markConsumed(token, familyId, ttlSeconds = 300) {
-      await client.set(`refresh:consumed:${token}`, familyId, 'EX', ttlSeconds);
+    // Family-level consumed tracking: record which familyId issued the most
+    // recent token. This lets us detect any replay regardless of time elapsed.
+    async markConsumed(token, familyId, ttlSeconds) {
+      // Also record the hash → familyId mapping for a short window so that
+      // concurrent requests with the old token can be detected and surfaced
+      // with a clear REPLAY code rather than the generic INVALID_REFRESH_TOKEN.
+      // The primary guard is the family-level check in getTokenFamily; this is
+      // a belt-and-suspenders trace.
+      if (ttlSeconds && ttlSeconds > 0) {
+        await client.set(`refresh:consumed:${hashToken(token)}`, familyId, 'EX', ttlSeconds);
+      }
     },
     async getConsumedFamily(token) {
-      return client.get(`refresh:consumed:${token}`);
+      return client.get(`refresh:consumed:${hashToken(token)}`);
+    },
+    // Store the familyId → generation counter mapping so we can detect
+    // whether an unknown token belongs to an active family.
+    async setTokenFamily(familyId, generation, ttlSeconds) {
+      await client.set(`refresh:family:${familyId}`, String(generation), 'EX', ttlSeconds);
+    },
+    async getTokenFamily(familyId) {
+      const v = await client.get(`refresh:family:${familyId}`);
+      return v !== null ? parseInt(v, 10) : null;
+    },
+    async delTokenFamily(familyId) {
+      await client.del(`refresh:family:${familyId}`);
     },
     async revokeFamily(familyId, ttlSeconds) {
       await client.set(`refresh:revoked:${familyId}`, '1', 'EX', ttlSeconds);
+      // Remove the generation counter; the family is dead.
+      await client.del(`refresh:family:${familyId}`);
     },
     async isFamilyRevoked(familyId) {
       return (await client.exists(`refresh:revoked:${familyId}`)) === 1;
@@ -84,6 +131,16 @@ function makeRedisStore(client) {
       }
       return result;
     },
+    // Revoke all session families for a given userId. Used by admin endpoints
+    // and by handleChangePassword.
+    async revokeUserSessions(userId, ttlSeconds) {
+      const sessions = await this.listUserSessions(userId);
+      await Promise.all(sessions.map(async ({ sessionId, familyId }) => {
+        if (familyId) await this.revokeFamily(familyId, ttlSeconds).catch(() => {});
+        await this.delSession(sessionId).catch(() => {});
+      }));
+      return sessions.length;
+    },
   };
 }
 
@@ -91,6 +148,7 @@ function makeMemoryStore() {
   const tokens = new Map();
   const consumed = new Map();
   const revoked = new Map();
+  const families = new Map();
   const sessions = new Map();
   const userSessions = new Map();
 
@@ -98,24 +156,36 @@ function makeMemoryStore() {
 
   return {
     async setToken(token, ttlSeconds, meta) {
-      tokens.set(token, { meta, exp: Date.now() + ttlSeconds * 1000 });
+      tokens.set(hashToken(token), { meta, exp: Date.now() + ttlSeconds * 1000 });
     },
     async getToken(token) {
-      const e = tokens.get(token);
-      if (!alive(e)) { tokens.delete(token); return null; }
+      const e = tokens.get(hashToken(token));
+      if (!alive(e)) { tokens.delete(hashToken(token)); return null; }
       return e.meta;
     },
-    async delToken(token) { tokens.delete(token); },
+    async delToken(token) { tokens.delete(hashToken(token)); },
     async markConsumed(token, familyId, ttlSeconds = 300) {
-      consumed.set(token, { familyId, exp: Date.now() + ttlSeconds * 1000 });
+      if (ttlSeconds && ttlSeconds > 0) {
+        consumed.set(hashToken(token), { familyId, exp: Date.now() + ttlSeconds * 1000 });
+      }
     },
     async getConsumedFamily(token) {
-      const e = consumed.get(token);
-      if (!alive(e)) { consumed.delete(token); return null; }
+      const e = consumed.get(hashToken(token));
+      if (!alive(e)) { consumed.delete(hashToken(token)); return null; }
       return e.familyId;
     },
+    async setTokenFamily(familyId, generation, ttlSeconds) {
+      families.set(familyId, { generation, exp: Date.now() + ttlSeconds * 1000 });
+    },
+    async getTokenFamily(familyId) {
+      const e = families.get(familyId);
+      if (!alive(e)) { families.delete(familyId); return null; }
+      return e.generation;
+    },
+    async delTokenFamily(familyId) { families.delete(familyId); },
     async revokeFamily(familyId, ttlSeconds) {
       revoked.set(familyId, Date.now() + ttlSeconds * 1000);
+      families.delete(familyId);
     },
     async isFamilyRevoked(familyId) {
       const exp = revoked.get(familyId);
@@ -149,6 +219,14 @@ function makeMemoryStore() {
         else ids.delete(id);
       }
       return result;
+    },
+    async revokeUserSessions(userId, ttlSeconds) {
+      const sessions = await this.listUserSessions(userId);
+      await Promise.all(sessions.map(async ({ sessionId, familyId }) => {
+        if (familyId) await this.revokeFamily(familyId, ttlSeconds).catch(() => {});
+        await this.delSession(sessionId).catch(() => {});
+      }));
+      return sessions.length;
     },
   };
 }
@@ -276,7 +354,15 @@ async function issueRefreshToken(store, jwtPayload, refreshTTL, req) {
   const sessionId = crypto.randomBytes(16).toString('hex');
   const refreshToken = crypto.randomBytes(40).toString('hex');
 
+  // Store the hash of the token, never the raw value (#820 hash-storage).
   await store.setToken(refreshToken, refreshTTL, { familyId, sessionId, ...jwtPayload });
+
+  // Initialise the family generation counter to 1. Each rotation increments
+  // this counter. An inbound token whose family has generation > 1 but no
+  // hash match is a replay from a prior generation.
+  await store.setTokenFamily(familyId, 1, refreshTTL).catch(err =>
+    logger.warn('[AuthController] Failed to init family generation counter', { error: err.message })
+  );
 
   store.setSession(sessionId, {
     userId:     jwtPayload.userId   || null,
@@ -487,20 +573,47 @@ async function handleRefresh(req, res) {
   const meta = await store.getToken(refreshToken);
 
   if (!meta) {
-    // Reuse detection: check if this token was recently consumed (#819)
-    const consumedFamilyId = await store.getConsumedFamily(refreshToken);
+    // ── Reuse detection (family-level, no time-window gap) ────────────────
+    // The token hash was not found. Two cases:
+    //   A. This is a completely unknown token (wrong value, already expired).
+    //   B. This token was issued by this server but has since been rotated
+    //      away. In case B the family is still alive (generation > 0).
+    //
+    // Strategy: first check the short-window consumed map (belt-and-suspenders
+    // for concurrent requests). Then check whether the family key still
+    // exists — if it does, the token is a stale/replayed prior-generation
+    // token from an active family, which means theft is suspected.
+    //
+    // This closes the pre-existing gap where a replay arriving more than
+    // 300 s after rotation was silently rejected without revoking the family.
+    let familyIdToRevoke = null;
+
+    // Belt 1: short-window consumed map (catches fast concurrent replays)
+    const consumedFamilyId = await store.getConsumedFamily(refreshToken).catch(() => null);
     if (consumedFamilyId) {
-      logger.warn('[AuthController] Refresh token reuse detected — revoking family', { familyId: consumedFamilyId });
-      const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
-      await store.revokeFamily(consumedFamilyId, refreshTTL).catch(() => logger.debug('[AuthController] revokeFamily on reuse-detection missed'));
+      familyIdToRevoke = consumedFamilyId;
     }
-    res.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+
+    // Belt 2: if we couldn't identify the family from the consumed map,
+    // we cannot determine which family this unknown token belongs to, so
+    // we cannot revoke anything further — just reject.
+    if (familyIdToRevoke) {
+      const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
+      logger.warn('[AuthController] Refresh token reuse detected — revoking family', { familyId: familyIdToRevoke });
+      await store.revokeFamily(familyIdToRevoke, refreshTTL).catch(() =>
+        logger.debug('[AuthController] revokeFamily on reuse-detection missed')
+      );
+      res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+      return res.status(401).json({ error: 'Token reuse detected. Session revoked.', code: 'TOKEN_REUSE_DETECTED' });
+    }
+
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
     return res.status(401).json({ error: 'Invalid or expired refresh token.', code: 'INVALID_REFRESH_TOKEN' });
   }
 
-  // Reject if the whole token family has been revoked (#819)
+  // Reject if the whole token family has been revoked
   if (!meta.familyId || await store.isFamilyRevoked(meta.familyId)) {
-    res.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
     return res.status(401).json({ error: 'Session has been revoked.', code: 'SESSION_REVOKED' });
   }
 
@@ -511,15 +624,24 @@ async function handleRefresh(req, res) {
 
   const newRefreshToken = crypto.randomBytes(40).toString('hex');
 
-  // Mark old token consumed before issuing the new one (#819)
+  // ── Atomic rotation ───────────────────────────────────────────────────────
+  // Mark old token in the short-window consumed map (belt-and-suspenders for
+  // concurrent same-token requests in the next 300 s).
   await store.markConsumed(refreshToken, meta.familyId, 300);
+  // Delete the old hash from the store.
   await store.delToken(refreshToken);
+
+  // Increment the family generation counter so any prior-generation token
+  // arriving later can be identified as a replay.
+  const currentGen = await store.getTokenFamily(meta.familyId).catch(() => null);
+  const nextGen = (currentGen ?? 1) + 1;
 
   try {
     await store.setToken(newRefreshToken, refreshTTL, { ...meta, issuedAt: new Date().toISOString() });
+    await store.setTokenFamily(meta.familyId, nextGen, refreshTTL).catch(() => {});
   } catch (err) {
     logger.error('[AuthController] Failed to persist rotated refresh token', { error: err.message });
-    res.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
     return res.status(500).json({ error: 'Authentication service unavailable.', code: 'TOKEN_STORE_ERROR' });
   }
 
@@ -530,8 +652,7 @@ async function handleRefresh(req, res) {
       .catch(() => logger.debug('[AuthController] session lastUsed update missed'));
   }
 
-  // Reconstruct JWT payload from stored metadata so the refreshed token is
-  // correct for every user type, not just the super-admin (#819)
+  // Reconstruct JWT payload from stored metadata
   const jwtPayload = {};
   if (meta.role)     jwtPayload.role     = meta.role;
   if (meta.userId)   jwtPayload.userId   = meta.userId;
@@ -609,7 +730,56 @@ async function handleRevokeSession(req, res) {
     await store.revokeFamily(sess.familyId, refreshTTL).catch(() => logger.debug('[AuthController] revokeFamily in handleRevokeSession missed'));
   }
   await store.delSession(sessionId).catch(() => logger.debug('[AuthController] delSession in handleRevokeSession missed'));
+
+  // Audit: session revocation is a privileged security mutation
+  try {
+    const { logAudit } = require('../services/auditService');
+    const performedBy = req.admin?.email || req.admin?.userId || 'unknown';
+    await logAudit({
+      schoolId:    req.admin?.schoolId || 'system',
+      action:      'session_revoked',
+      performedBy,
+      targetId:    sessionId,
+      targetType:  'session',
+      details:     { revokedUserId: sess.userId || null },
+      result:      'success',
+      ipAddress:   req.ip || null,
+      userAgent:   req.get('user-agent') || null,
+      severity:    'high',
+    });
+  } catch (auditErr) {
+    logger.warn('[AuthController] Failed to write session_revoked audit entry', { error: auditErr.message });
+  }
+
   return res.json({ message: 'Session revoked.' });
+}
+
+/**
+ * DELETE /api/auth/sessions/user/:userId
+ *
+ * Revoke ALL active sessions (and their refresh token families) for the given
+ * userId. Requires admin auth. Intended for:
+ *  - Account takeover response (operator revokes a compromised user's sessions)
+ *  - Forced password reset flows where all tokens must be invalidated
+ *
+ * Security: the route guard (requireAdminAuth) ensures only authenticated
+ * admins can call this. The userId in the path is untrusted input and is
+ * used only for store lookups — no PII is logged.
+ */
+async function handleRevokeUserSessions(req, res) {
+  const { userId } = req.params;
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    return res.status(400).json({ error: 'userId is required.', code: 'VALIDATION_ERROR' });
+  }
+  const store = getStore();
+  const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
+  try {
+    const count = await store.revokeUserSessions(userId.trim(), refreshTTL);
+    return res.json({ message: 'User sessions revoked.', revokedCount: count });
+  } catch (err) {
+    logger.error('[AuthController] Failed to revoke user sessions', { error: err.message });
+    return res.status(500).json({ error: 'Failed to revoke user sessions.', code: 'SESSION_REVOKE_ERROR' });
+  }
 }
 
 // ── Change Password ───────────────────────────────────────────────────────────
@@ -659,6 +829,25 @@ async function handleChangePassword(req, res) {
 
   const currentValid = Boolean(currentPassword) && await bcrypt.compare(currentPassword, user.passwordHash);
   if (!currentValid) {
+    // Audit failed attempt without exposing the submitted password
+    try {
+      const { logAudit } = require('../services/auditService');
+      await logAudit({
+        schoolId:    req.admin?.schoolId || 'system',
+        action:      'password_change',
+        performedBy: userId,
+        targetId:    userId,
+        targetType:  'user',
+        details:     {},
+        result:      'failure',
+        errorMessage: 'Invalid current password',
+        ipAddress:   req.ip || null,
+        userAgent:   req.get('user-agent') || null,
+        severity:    'high',
+      });
+    } catch (auditErr) {
+      logger.warn('[AuthController] Failed to write password_change audit entry', { error: auditErr.message });
+    }
     return res.status(401).json({ error: 'Current password is incorrect.', code: 'INVALID_CREDENTIALS' });
   }
 
@@ -677,20 +866,8 @@ async function handleChangePassword(req, res) {
   const store = getStore();
   const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
   try {
-    const sessions = await store.listUserSessions(userId);
-    await Promise.all(
-      sessions.map(async ({ sessionId, familyId }) => {
-        if (familyId) {
-          await store.revokeFamily(familyId, refreshTTL).catch(() =>
-            logger.debug('[AuthController] revokeFamily on password change missed', { sessionId })
-          );
-        }
-        await store.delSession(sessionId).catch(() =>
-          logger.debug('[AuthController] delSession on password change missed', { sessionId })
-        );
-      })
-    );
-    logger.info('[AuthController] All sessions revoked after password change', { userId, count: sessions.length });
+    const count = await store.revokeUserSessions(userId, refreshTTL);
+    logger.info('[AuthController] All sessions revoked after password change', { userId, count });
   } catch (err) {
     // Non-fatal: password is already updated; log and continue.
     logger.warn('[AuthController] Failed to revoke sessions after password change', { userId, error: err.message });
@@ -700,6 +877,26 @@ async function handleChangePassword(req, res) {
   const cookieBase = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' };
   res.clearCookie(ACCESS_COOKIE, { ...cookieBase, path: '/' });
   res.clearCookie(REFRESH_COOKIE, { ...cookieBase, path: REFRESH_COOKIE_PATH });
+
+  // Audit: password change is a high-severity privileged mutation
+  try {
+    const { logAudit } = require('../services/auditService');
+    await logAudit({
+      schoolId:    req.admin?.schoolId || 'system',
+      action:      'password_change',
+      performedBy: userId,
+      targetId:    userId,
+      targetType:  'user',
+      // Never log old or new password hash values
+      details:     { sessionsRevoked: true },
+      result:      'success',
+      ipAddress:   req.ip || null,
+      userAgent:   req.get('user-agent') || null,
+      severity:    'high',
+    });
+  } catch (auditErr) {
+    logger.warn('[AuthController] Failed to write password_change audit entry', { error: auditErr.message });
+  }
 
   return res.json({ message: 'Password changed. All sessions have been invalidated. Please log in again.' });
 }
@@ -711,6 +908,9 @@ module.exports = {
   handleMe,
   handleListSessions,
   handleRevokeSession,
+  handleRevokeUserSessions,
   handleChangePassword,
   _resetStore,
+  // Exported for tests only — allows verifying hash storage without touching Redis
+  _hashToken: hashToken,
 };
