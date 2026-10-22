@@ -10,6 +10,7 @@ import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
 import { useAbortController } from "../hooks/useAbortController";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
+import { SkeletonDetailCard } from "../components/Skeleton";
 
 const EMPTY_FORM = { publicKey: "", label: "" };
 
@@ -170,7 +171,7 @@ export default function SourceValidationRules() {
         </div>
 
         {loading ? (
-          <div style={{ padding: "1.5rem" }}>Loading…</div>
+          <div style={{ padding: "1.5rem" }}><SkeletonDetailCard rows={4} /></div>
         ) : rules.length === 0 ? (
           <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
             <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>No rules yet</p>

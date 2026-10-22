@@ -176,6 +176,7 @@ export function useAuditFilters() {
   // once from the query and ignore subsequent query changes (the hook owns
   // the source of truth after mount).
   const initialisedRef = useRef(false);
+  const historyModeRef = useRef("replace");
   const [filters, setFiltersRaw] = useState(EMPTY_FILTERS);
 
   // Initialise from URL on first time router.query is populated.
@@ -183,9 +184,25 @@ export function useAuditFilters() {
   useEffect(() => {
     if (!initialisedRef.current && router.isReady) {
       initialisedRef.current = true;
+      historyModeRef.current = "replace";
       setFiltersRaw(parseQuery(router.query));
     }
   }, [router.isReady, router.query]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const nextFilters = parseQuery(router.query);
+      historyModeRef.current = "replace";
+      setFiltersRaw((current) => (
+        Object.keys(EMPTY_FILTERS).every((key) => current[key] === nextFilters[key])
+          ? current
+          : nextFilters
+      ));
+      setPaginationResetCount((count) => count + 1);
+    };
+    router.events.on("routeChangeComplete", syncFromUrl);
+    return () => router.events.off("routeChangeComplete", syncFromUrl);
+  }, [router]);
 
   // ── Debounced text values ───────────────────────────────────────────────
   const [debouncedActorId, setDebouncedActorId] = useState("");
@@ -208,8 +225,8 @@ export function useAuditFilters() {
 
   // ── URL sync ────────────────────────────────────────────────────────────
   // Keep the URL in sync whenever filters change (after initialisation).
-  // We use router.replace + shallow so the browser history stack stays clean
-  // and the page does not re-render from the server.
+  // Discrete filters create history entries; text edits replace the current
+  // entry so typing does not flood the browser history.
   const syncUrlRef = useRef(false); // avoid syncing back on the initial read
   useEffect(() => {
     if (!initialisedRef.current) return; // not yet initialised from URL
@@ -218,10 +235,12 @@ export function useAuditFilters() {
       syncUrlRef.current = true;
       return;
     }
-    router.replace(
+    const method = historyModeRef.current;
+    historyModeRef.current = "replace";
+    router[method](
       { pathname: router.pathname, query: toQuery(filters) },
       undefined,
-      { shallow: true }
+      { shallow: true, scroll: false }
     );
   }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -235,8 +254,12 @@ export function useAuditFilters() {
    */
   const setFilter = useCallback((key, value) => {
     const sanitised = validate(key, value);
+    historyModeRef.current = key === "actorId" || key === "search" ? "replace" : "push";
     setFiltersRaw((prev) => {
-      if (prev[key] === sanitised) return prev; // no-op
+      if (prev[key] === sanitised) {
+        historyModeRef.current = "replace";
+        return prev;
+      }
       return { ...prev, [key]: sanitised };
     });
     setPaginationResetCount((n) => n + 1);
@@ -247,6 +270,7 @@ export function useAuditFilters() {
    * Reset all filters to empty and increment the pagination-reset counter.
    */
   const clearAll = useCallback(() => {
+    historyModeRef.current = "push";
     setFiltersRaw(EMPTY_FILTERS);
     setPaginationResetCount((n) => n + 1);
   }, []);

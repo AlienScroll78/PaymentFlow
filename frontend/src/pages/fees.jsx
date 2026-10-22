@@ -13,6 +13,7 @@ import { IconAlertTriangle, IconCheck, IconDollarSign, IconChevronLeft, IconChev
 import PageHero from "../components/PageHero";
 import AccessiblePagination from "../components/AccessiblePagination";
 import ConfirmDialog from "../components/ConfirmDialog"; // Issue #108
+import { SkeletonTable } from "../components/Skeleton";
 import { useAbortController } from "../hooks/useAbortController";
 
 const EMPTY_FORM = {
@@ -332,11 +333,7 @@ export default function FeesPage() {
           </div>
 
           {loading ? (
-            <div className="card-body">
-              <p aria-busy="true" style={{ color: "var(--text-muted)" }}>
-                {t("fees.loading")}
-              </p>
-            </div>
+            <div className="card-body"><SkeletonTable columns={[90, 90, 100, "100%", 36]} rows={5} /></div>
           ) : fees.length === 0 ? (
             <div className="card-body">
               <p style={{ color: "var(--text-muted)" }}>

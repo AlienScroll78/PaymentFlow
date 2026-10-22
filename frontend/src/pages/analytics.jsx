@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import { IconAlertTriangle, IconTrendingUp, IconUsers } from "../components/Icons";
+import { SkeletonDetailCard, SkeletonStatCard } from "../components/Skeleton";
 import { useAbortController } from "../hooks/useAbortController";
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
@@ -52,11 +53,14 @@ function Analytics() {
 
   if (loading) {
     return (
-      <div className="page-wrap">
-        <p aria-busy="true" style={{ color: "var(--text-muted)" }}>
-          {t("analytics.loading")}
-        </p>
-      </div>
+      <>
+        <PageHero eyebrow={t("analytics.eyebrow")} title={t("analytics.title")} subtitle={t("analytics.subtitle")} />
+        <div className="page-wrap" role="status" aria-live="polite" aria-busy="true" aria-label="Loading...">
+          <div className="stat-grid" aria-hidden="true">{[0, 1, 2, 3].map((index) => <SkeletonStatCard key={index} />)}</div>
+          <SkeletonDetailCard rows={4} />
+          <SkeletonDetailCard rows={3} />
+        </div>
+      </>
     );
   }
 

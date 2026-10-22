@@ -34,7 +34,7 @@ async function getReport(req, res, next) {
     // req.query values are always strings; coerce explicitly so ?async=false is
     // treated as false rather than the truthy string "false".
     const isAsync = req.query.async === 'true';
-    const isLargeReport = getDaysBetween(startDate, endDate) >= LARGE_REPORT_THRESHOLD_DAYS;
+    const isLargeReport = !startDate || !endDate || getDaysBetween(startDate, endDate) >= LARGE_REPORT_THRESHOLD_DAYS;
 
     // Audit report exports — exports can contain PII so they are a privileged read
     if (req.auditContext) {

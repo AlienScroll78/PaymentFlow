@@ -10,6 +10,7 @@ import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import { useTranslation } from "react-i18next";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
+import { useAuditFilters } from "../hooks/useAuditFilters";
 
 const ACTION_LABELS = {
   student_create:       "auditLogs.event.student_create",
@@ -42,30 +43,8 @@ function AuditLogsContent() {
   const [cursorStack, setCursorStack] = useState([]); // Stack of previous cursors for back button
   const [expandedId, setExpandedId]   = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
-
-  const [actionFilter, setActionFilter]         = useState("");
-  const [targetTypeFilter, setTargetTypeFilter] = useState("");
-  const [resultFilter, setResultFilter]         = useState("");
-  const [startDate, setStartDate]               = useState("");
-  const [endDate, setEndDate]                   = useState("");
-  const [actorIdInput, setActorIdInput]         = useState("");
-  const [actorIdFilter, setActorIdFilter]       = useState("");
-  const [searchInput, setSearchInput]           = useState("");
-  const [searchFilter, setSearchFilter]         = useState("");
-
-  // Issue #254 — abort in-flight audit-log requests when the component
-  // unmounts to prevent stale responses from updating the wrong route's state.
-  const { signal } = useAbortController();
-
-  // Debounce the free-text inputs so we don't fire a request per keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => setActorIdFilter(actorIdInput.trim()), 350);
-    return () => clearTimeout(t);
-  }, [actorIdInput]);
-  useEffect(() => {
-    const t = setTimeout(() => setSearchFilter(searchInput.trim()), 350);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  const { filters, setFilter, clearAll, apiParams } = useAuditFilters();
+  const [copyStatus, setCopyStatus] = useState("");
 
   const fetchLogs = (cursor = null) => {
     const isLoadMore = cursor !== null && cursor !== undefined;
@@ -77,20 +56,9 @@ function AuditLogsContent() {
       setCursorStack([]);
     }
     setError(null);
-    const params = { limit: 50 };
+    const params = { ...apiParams };
     if (cursor) params.cursor = cursor;
-    if (actionFilter)     params.action     = actionFilter;
-    if (targetTypeFilter) params.targetType = targetTypeFilter;
-    if (resultFilter)     params.result     = resultFilter;
-    if (actorIdFilter)    params.performedBy = actorIdFilter;
-    if (searchFilter)     params.search     = searchFilter;
-    if (startDate)        params.startDate  = new Date(startDate).toISOString();
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      params.endDate = end.toISOString();
-    }
-    getAuditLogs(params, { signal })
+    getAuditLogs(params)
       .then(({ data }) => {
         if (isLoadMore) {
           setLogs(prev => [...prev, ...data.data]);
@@ -115,7 +83,19 @@ function AuditLogsContent() {
       });
   };
 
-  useEffect(() => { fetchLogs(1); }, [actionFilter, targetTypeFilter, resultFilter, actorIdFilter, searchFilter, startDate, endDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchLogs(null); }, [
+    filters.action, filters.targetType, filters.result, filters.startDate, filters.endDate,
+    apiParams.performedBy, apiParams.search,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function copyFilterUrl() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy unavailable");
+    }
+  }
 
   return (
     <>
@@ -220,11 +200,25 @@ function AuditLogsContent() {
         <div className="card">
           {/* Filters */}
           <div className="al-filters">
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "0.5rem" }}>
+              <button type="button" className="btn btn-ghost" onClick={copyFilterUrl}>
+                Copy filter URL
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={clearAll}
+                disabled={!Object.values(filters).some(Boolean)}
+              >
+                Reset all filters
+              </button>
+              {copyStatus && <span role="status" style={{ fontSize: "0.75rem" }}>{copyStatus}</span>}
+            </div>
             <div>
               <label className="al-filter-label">{t("auditLogs.filterActionLabel")}</label>
               <select
-                value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
+                value={filters.action}
+                onChange={e => setFilter("action", e.target.value)}
                 className="al-filter-input"
               >
                 <option value="">{t("auditLogs.allActions")}</option>
@@ -237,8 +231,8 @@ function AuditLogsContent() {
             <div>
               <label className="al-filter-label">{t("auditLogs.filterTargetTypeLabel")}</label>
               <select
-                value={targetTypeFilter}
-                onChange={e => setTargetTypeFilter(e.target.value)}
+                value={filters.targetType}
+                onChange={e => setFilter("targetType", e.target.value)}
                 className="al-filter-input"
               >
                 <option value="">{t("auditLogs.allTypes")}</option>
@@ -251,8 +245,8 @@ function AuditLogsContent() {
             <div>
               <label className="al-filter-label">{t("auditLogs.filterResultLabel")}</label>
               <select
-                value={resultFilter}
-                onChange={e => setResultFilter(e.target.value)}
+                value={filters.result}
+                onChange={e => setFilter("result", e.target.value)}
                 className="al-filter-input"
                 aria-label={t("auditLogs.filterByResult")}
               >
@@ -266,8 +260,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterActorIdLabel")}</label>
               <input
                 type="text"
-                value={actorIdInput}
-                onChange={e => setActorIdInput(e.target.value)}
+                value={filters.actorId}
+                onChange={e => setFilter("actorId", e.target.value)}
                 placeholder={t("auditLogs.actorPlaceholder")}
                 className="al-filter-input"
               />
@@ -277,8 +271,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterSearchLabel")}</label>
               <input
                 type="text"
-                value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
+                value={filters.search}
+                onChange={e => setFilter("search", e.target.value)}
                 placeholder={t("auditLogs.searchPlaceholder")}
                 className="al-filter-input"
               />
@@ -288,8 +282,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterFromLabel")}</label>
               <input
                 type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
+                value={filters.startDate}
+                onChange={e => setFilter("startDate", e.target.value)}
                 className="al-filter-input"
               />
             </div>
@@ -298,8 +292,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterToLabel")}</label>
               <input
                 type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
+                value={filters.endDate}
+                onChange={e => setFilter("endDate", e.target.value)}
                 className="al-filter-input"
               />
             </div>
@@ -307,7 +301,7 @@ function AuditLogsContent() {
 
           {/* Table — loading / error / empty / data */}
           {(() => {
-            const hasActiveFilters = !!(actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate);
+            const hasActiveFilters = Object.values(filters).some(Boolean);
 
             if (error) {
               return (
@@ -378,8 +372,7 @@ function AuditLogsContent() {
                         action={hasActiveFilters ? {
                           label: "Clear filters",
                           onClick: () => {
-                            setActionFilter(""); setTargetTypeFilter(""); setResultFilter("");
-                            setActorIdInput(""); setSearchInput(""); setStartDate(""); setEndDate("");
+                            clearAll();
                           }
                         } : undefined}
                       />
