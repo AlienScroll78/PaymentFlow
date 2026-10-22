@@ -76,7 +76,11 @@ export default function FilterChips({ filters = [], onRemove, onClearAll }) {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-
+        .filter-chip-key {
+          font-weight: 400;
+          opacity: 0.75;
+          margin-right: 0.125rem;
+        }
         .filter-chip-remove {
           display: inline-flex;
           align-items: center;
@@ -101,7 +105,6 @@ export default function FilterChips({ filters = [], onRemove, onClearAll }) {
           outline: 2px solid var(--accent);
           outline-offset: 1px;
         }
-
         .filter-chip-clear {
           display: inline-flex;
           align-items: center;
