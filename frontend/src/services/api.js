@@ -94,7 +94,12 @@ export const getPaymentSummary = ({ signal } = {}) => api.get("/payments/summary
 export const getPaymentInstructions = (studentId, { signal } = {}) => api.get(`/payments/instructions/${studentId}`, { signal });
 export const getStudentPayments = (studentId, { signal } = {}) => api.get(`/payments/${studentId}`, { signal });
 export const getStudentBalance  = (studentId, { signal } = {}) => api.get(`/payments/balance/${studentId}`, { signal });
-export const verifyPayment = (txHash) => api.post("/payments/verify", { txHash });
+export const verifyPayment = (txHash, idempotencyKey) =>
+  api.post(
+    "/payments/verify",
+    { txHash },
+    idempotencyKey ? { headers: { "X-Idempotency-Key": idempotencyKey } } : {}
+  );
 export const syncPayments = () => api.post("/payments/sync");
 export const getSyncStatus = ({ signal } = {}) => api.get("/payments/sync/status", { signal });
 export const getFeeStructures = () => api.get("/fees");
