@@ -1,278 +1,292 @@
-# Data Classification Policy
+# Data Classification and Redaction Rules
 
-**Version:** 1.0
-**Effective Date:** 2026-10-21
-**Closes:** [#322](https://github.com/onlyonee1/PaymentFlow/issues/322)
+Logs, exports, and support tooling must treat financial and identity data
+consistently. This document defines sensitive field categories, prohibited
+logging destinations, masking rules, retention limits, and safe code examples.
+It aligns with the threat model in [`docs/security.md`](security.md) and the
+PII protection tested in [`tests/studentPiiProtection.test.js`](../tests/studentPiiProtection.test.js).
 
----
+## Table of Contents
 
-## Overview
-
-StellarEduPay stores sensitive data about students, their parents, schools, and payment transactions. This document defines the data classification scheme, maps every significant database field to its classification, and specifies redaction rules for logs, error messages, and API responses.
-
-**All engineers, on-call responders, and contributors who work with production data must read and follow this policy.**
-
----
-
-## Classification Levels
-
-| Level | Label | Description | Examples |
-|-------|-------|-------------|---------|
-| **L1** | Public | Intentionally public; no harm if disclosed | API version, supported assets, network name |
-| **L2** | Internal | Non-sensitive operational data; access limited to authenticated users | Payment amounts, fee structures, payment status |
-| **L3** | Confidential | Sensitive business or operational data; disclosure could embarrass or harm the school | Admin email, school name, webhook URL, audit log entries |
-| **L4** | Restricted | Personal data (PII), financial identifiers, or cryptographic secrets; subject to data protection law (GDPR, NDPA equivalents) and maximum access control | Student name, parent email/phone, txHash, private keys, MFA secrets |
-
-Restricted (L4) data must:
-- Never appear in log files
-- Never appear in API error response bodies
-- Never appear in webhook payloads unless the school has explicitly opted in
-- Be encrypted at rest wherever technically feasible
+- [Data Categories](#data-categories)
+- [Sensitive Fields Reference](#sensitive-fields-reference)
+  - [Authentication and Secrets](#authentication-and-secrets)
+  - [Financial Data](#financial-data)
+  - [Student and Parent PII](#student-and-parent-pii)
+  - [Blockchain Identifiers](#blockchain-identifiers)
+  - [Session and Request Data](#session-and-request-data)
+- [Prohibited Logging](#prohibited-logging)
+- [Automated Checks and Enforcement](#automated-checks-and-enforcement)
+- [Masking and Safe Examples](#masking-and-safe-examples)
+- [Allowed Destinations by Category](#allowed-destinations-by-category)
+- [Retention Policy](#retention-policy)
+- [Incident and Support Handling](#incident-and-support-handling)
 
 ---
 
-## Field Classification: Student Collection
+## Data Categories
 
-| Field | Classification | Notes |
-|-------|---------------|-------|
-| `_id` | L2 Internal | MongoDB ObjectId; no PII |
-| `schoolId` | L2 Internal | Tenant identifier |
-| `studentId` | L3 Confidential | Used as Stellar memo; treat as identifier |
-| `name` | **L4 Restricted** | Student full name — PII |
-| `class` | L2 Internal | |
-| `academicYear` | L2 Internal | |
-| `feeAmount` | L2 Internal | |
-| `fees` (array) | L2 Internal | Fee categories and amounts |
-| `feePaid` | L2 Internal | |
-| `totalPaid` | L2 Internal | |
-| `remainingBalance` | L2 Internal | |
-| `creditAdjustments` | L3 Confidential | Financial adjustment ledger |
-| `parentEmail` | **L4 Restricted** | PII — encrypted at rest (migration 029) |
-| `parentEmailHash` | L3 Confidential | Blind index of parentEmail; not reversible but correlatable |
-| `parentPhone` | **L4 Restricted** | PII — encrypted at rest (migration 029) |
-| `parentName` | **L4 Restricted** | PII |
-| `dateOfBirth` | **L4 Restricted** | PII — sensitive demographic data |
-| `gender` | **L4 Restricted** | PII — sensitive demographic data |
-| `contactNumber` | **L4 Restricted** | PII |
-| `lastReminderSentAt` | L2 Internal | |
-| `reminderCount` | L2 Internal | |
-| `reminderOptOut` | L2 Internal | |
-| `parentEmailSuppressed` | L2 Internal | |
-| `parentEmailSuppressionReason` | L2 Internal | |
-| `disputeHold` | L2 Internal | |
-| `deletedAt` | L2 Internal | Soft-delete timestamp |
-| `lastPaymentHash` | L3 Confidential | Links to a specific payment; see Payment.txHash |
-
-**Encryption status:** `parentEmail` and `parentPhone` are AES-256-GCM encrypted at rest via `studentPiiEncryption.js` (migration 029). `parentEmailHash` is a deterministic HMAC-SHA256 blind index used for exact-match lookups (e.g. email suppression) without decrypting.
+| Category | Description | Risk level |
+|----------|-------------|------------|
+| **Authentication secrets** | Passwords, JWT secrets, MFA codes, API keys | Critical |
+| **Financial data** | Transaction hashes, payment amounts, wallet addresses | High |
+| **Student PII** | Student IDs, parent email, parent phone | High |
+| **Session tokens** | JWT access/refresh tokens, cookies, idempotency keys | High |
+| **Operational config** | Database URIs, Redis passwords, SMTP credentials | High |
+| **Blockchain identifiers** | Sender addresses, memo fields | High |
+| **Non-sensitive operational** | Request method, URL path, response duration, status codes | Low |
 
 ---
 
-## Field Classification: Payment Collection
+## Sensitive Fields Reference
 
-| Field | Classification | Notes |
-|-------|---------------|-------|
-| `_id` | L2 Internal | |
-| `schoolId` | L2 Internal | |
-| `studentId` | L3 Confidential | |
-| `txHash` | **L4 Restricted** | Blockchain transaction hash — financial identifier; redacted in request logs |
-| `amount` | L2 Internal | |
-| `correlationId` | L2 Internal | Derived from txHash; safe for logs |
-| `feeAmount` | L2 Internal | |
-| `feeCategory` | L2 Internal | |
-| `feeValidationStatus` | L2 Internal | |
-| `excessAmount` | L2 Internal | |
-| `assetCode` | L2 Internal | 'XLM' or 'USDC' |
-| `status` | L2 Internal | |
-| `memo` | **L4 Restricted** | Contains studentId embedded by the parent; redacted in logs |
-| `senderAddress` | **L4 Restricted** | Parent's Stellar wallet address — financial/blockchain PII; redacted in logs |
-| `isSuspicious` | L2 Internal | |
-| `suspicionReason` | L3 Confidential | Internal fraud detection detail |
-| `suspicionReviewStatus` | L3 Confidential | |
-| `suspicionReviewedBy` | L3 Confidential | Admin email |
-| `suspicionReviewNote` | L3 Confidential | |
-| `confirmationState` | L2 Internal | |
-| `confirmedAt` | L2 Internal | |
-| `fiatSnapshot` | L2 Internal | Fiat conversion snapshot; no PII |
-| `underpaidReconciliation` | L3 Confidential | Reconciliation status; financial detail |
-| `deletedAt` | L2 Internal | |
+### Authentication and Secrets
+
+These values must **never** appear in logs, fixtures, exported files, or issue
+comments under any circumstances.
+
+| Field / Variable | Where it lives | Why sensitive |
+|-----------------|---------------|---------------|
+| `password` | Request body (`POST /api/auth/login`) | Plaintext password in transit |
+| `currentPassword` | Request body (password change) | Plaintext password in transit |
+| `secret` | MFA setup response, webhook config | TOTP seed or webhook signing secret |
+| `token` | Request body, query params | Access or refresh token |
+| `mfaCode` | Request body (`POST /api/auth/mfa/verify`) | One-time TOTP code |
+| `backupCode` | Request body (MFA recovery) | One-time recovery code |
+| `JWT_SECRET` | Env var | Signs all JWTs for this deployment |
+| `WEBHOOK_SECRET` | Env var | Signs outbound webhook payloads |
+| `MONGO_URI` / `MONGODB_URI` | Env var | Includes database credentials |
+| `SMTP_PASS` | Env var | Email service password |
+| `REDIS_PASSWORD` | Env var | Redis auth credential |
+| `ADMIN_PASSWORD` | Env var | Bootstrap admin account password |
+
+Source of truth: [`backend/src/utils/redactConfig.js`](../backend/src/utils/redactConfig.js)
+(`SENSITIVE_KEYS` set).
+
+### Financial Data
+
+| Field | Description | Handling |
+|-------|-------------|---------|
+| `txHash` | Stellar transaction hash | Redacted from request logs. Safe in audit log (internal, not public). |
+| `amount` | Payment amount (XLM / USDC) | Not redacted in logs but must not appear in client-facing error messages. |
+| `senderAddress` | Parent's Stellar wallet address | Redacted from request logs. Must not be exposed via public API. |
+| `memo` | Stellar memo field (student ID carrier) | Redacted from request logs. Encrypted at rest (migration 011). |
+| `remainingBalance` | Unpaid balance amount | Not returned by the public student endpoint. Admin-only. |
+| `totalPaid` | Total amount paid | Not returned by the public student endpoint. Admin-only. |
+| `feeAmount` | Fee owed | Not returned by the public student endpoint. Admin-only. |
+
+### Student and Parent PII
+
+| Field | Description | Handling |
+|-------|-------------|---------|
+| `studentId` | Unique student identifier | Redacted from request logs. Embedded in Stellar memo (encrypted at rest). |
+| `parentEmail` | Parent/guardian email address | Encrypted at rest (AES-256-GCM, migration 029). Not returned by public endpoint. |
+| `parentPhone` | Parent/guardian phone number | Encrypted at rest (AES-256-GCM, migration 029). Not returned by public endpoint. |
+| `name` (student) | Student full name | Returned by public endpoint (needed for QR/payment display). Not a redacted log field. |
+
+The `GET /api/students/public/:studentId` endpoint returns only `name`, `class`,
+and `feePaid`. It explicitly omits `parentEmail`, `parentPhone`, `totalPaid`,
+`remainingBalance`, `feeAmount`, and `studentId`. This is enforced by
+[`tests/studentPiiProtection.test.js`](../tests/studentPiiProtection.test.js).
+
+### Blockchain Identifiers
+
+| Field | Description | Handling |
+|-------|-------------|---------|
+| `senderAddress` | Stellar public key of the payer | Redacted from request logs. Never expose via public endpoint. |
+| `SCHOOL_WALLET_ADDRESS` | School's Stellar public key | Safe to log as operational info (public key is not a secret). |
+| Stellar secret key (`S...`) | School's Stellar private key | **Never** stored by this backend. Never log, never accept via API. |
+
+### Session and Request Data
+
+| Header / Field | Handling |
+|---------------|---------|
+| `authorization` | Redacted from request log headers. |
+| `cookie` | Redacted from request log headers. |
+| `set-cookie` | Redacted from request log headers. |
+| `x-api-key` | Redacted from request log headers. |
+| `idempotency-key` | Redacted from request log headers. |
+
+These are enforced by the `SENSITIVE_HEADERS` set in
+[`backend/src/middleware/requestLogger.js`](../backend/src/middleware/requestLogger.js).
 
 ---
 
-## Field Classification: School Collection
+## Prohibited Logging
 
-| Field | Classification | Notes |
-|-------|---------------|-------|
-| `_id` | L2 Internal | |
-| `schoolId` | L2 Internal | |
-| `name` | L2 Internal | School name is not PII |
-| `slug` | L1 Public | Used in API headers |
-| `stellarAddress` | L3 Confidential | School's receiving wallet; public on-chain but operationally sensitive |
-| `previousStellarAddress` | L3 Confidential | Pre-rotation address; see wallet-rotation runbook |
-| `network` | L1 Public | 'testnet' or 'mainnet' |
-| `syncCursor` | L2 Internal | |
-| `adminEmail` | **L4 Restricted** | Admin's personal email address — PII |
-| `contactEmail` | L3 Confidential | School contact email; school-level, not personal |
-| `webhookUrl` | L3 Confidential | Internal integration endpoint |
-| `webhookSecret` | **L4 Restricted** | HMAC signing key — encrypted at rest (migration 017); never logged |
-| `webhookPayloadConfig` | L2 Internal | |
-| `mfaEnabled` | L2 Internal | |
-| `mfaSecret` | **L4 Restricted** | TOTP secret — AES-256-GCM encrypted; never logged |
-| `mfaBackupCodes` | **L4 Restricted** | Hashed backup codes; never logged |
-| `localCurrency` | L2 Internal | |
-| `timezone` | L2 Internal | |
-| `suspiciousPaymentMultiplier` | L2 Internal | |
-| `maxStudents` | L2 Internal | |
-| `isActive` | L2 Internal | |
-| `settings` | L2 Internal | Per-school config overrides |
-| `classOptions` | L2 Internal | |
+A developer can identify a **prohibited log statement** by checking whether
+the value being logged matches any field in the tables above. The following
+rules define the boundary:
 
----
+### Never log
 
-## Field Classification: AuditLog Collection
+- Plaintext values of any `SENSITIVE_KEYS` env vars (JWT_SECRET, MONGO_URI, etc.)
+- Any request body field listed in `REQUEST_LOG_REDACT_FIELDS`:
+  `txHash`, `studentId`, `memo`, `senderAddress`, `password`, `secret`,
+  `token`, `mfaCode`, `backupCode`, `currentPassword`
+- `parentEmail` or `parentPhone` in any form (plaintext or raw ciphertext)
+- Authentication headers (`authorization`, `cookie`, `set-cookie`, `x-api-key`,
+  `idempotency-key`) in any log output
+- Full wallet addresses associated with specific students or parents
+- Database query results that contain the fields listed above
 
-| Field | Classification | Notes |
-|-------|---------------|-------|
-| `schoolId` | L2 Internal | |
-| `action` | L2 Internal | Audit action code |
-| `performedBy` | L3 Confidential | Admin user identifier (email or userId) |
-| `details` | L3 Confidential | May contain operational data; must not contain L4 fields in plaintext |
-| `createdAt` | L2 Internal | |
+### Acceptable in logs
 
-> Audit log entries must not embed raw PII. Reference fields by their opaque ID (`studentId`, `txHash`) rather than plaintext names or emails. If a `details` field needs to reference a student, use the studentId, not the student's name.
+- Counts: `"Updated 42 records"`, `"3 students migrated"`
+- Non-identifying keys: MongoDB `_id` values (ObjectId), `schoolId`, `class`
+- Operational metadata: HTTP method, URL path (not query params that carry PII),
+  status code, duration
+- Student display name (`name`) where needed for operational visibility
+- `SCHOOL_WALLET_ADDRESS` (it is a public blockchain address, not a secret)
+- Error codes and messages that do not echo back user-supplied secret values
+
+### Prohibited in test fixtures and issue comments
+
+- Real student names, email addresses, or phone numbers
+- Real Stellar wallet addresses (`G...` keys used in production or containing real funds)
+- Real transaction hashes from mainnet or testnet accounts with real funds
+- JWT tokens, MFA codes, or backup codes even if expired
+- MongoDB connection strings containing credentials
+
+Use placeholder values instead — see [Masking and Safe Examples](#masking-and-safe-examples).
 
 ---
 
-## Redaction Rules
+## Automated Checks and Enforcement
 
-### Log Redaction
+### Request logger redaction (runtime)
 
-The following fields are **automatically redacted** in HTTP request logs by `backend/src/middleware/requestLogger.js` using the `REQUEST_LOG_REDACT_FIELDS` list in `backend/src/utils/redactConfig.js`:
+`backend/src/middleware/requestLogger.js` calls `redact()` before writing any
+request body or query string to the log. The redaction field list is defined in
+`backend/src/utils/redactConfig.js` and can be extended via the
+`LOG_REDACT_FIELDS` environment variable (comma-separated):
 
-```javascript
-// backend/src/utils/redactConfig.js — See ADR-002 for idempotency context
-const REQUEST_LOG_REDACT_FIELDS = [
-  'txHash',       // L4 — blockchain financial identifier
-  'studentId',    // L3 — student identifier
-  'memo',         // L4 — contains studentId embedded in tx
-  'senderAddress',// L4 — parent's wallet address
-  'password',     // L4 — credentials
-  'secret',       // L4 — generic secrets
-  'token',        // L4 — auth tokens
-  'mfaCode',      // L4 — TOTP code
-  'backupCode',   // L4 — MFA backup code
-  'currentPassword', // L4 — credentials
-];
+```bash
+# Override at runtime — applies in addition to the default list:
+LOG_REDACT_FIELDS=myCustomField,anotherField npm start
 ```
 
-**Adding new Restricted fields:** When adding a new L4 field to any model, add its key to `REQUEST_LOG_REDACT_FIELDS` in `redactConfig.js`. Open a PR that includes both the model change and the redaction config update.
+The `redactHeaders()` function in the same file scrubs sensitive HTTP headers
+when `LOG_REQUEST_HEADERS=true` logging is enabled.
 
-### Environment Variable Redaction
+**Test coverage:** `backend/tests/requestLoggerRedaction.test.js` asserts that
+`password`, `mfaCode`, `backupCode`, `secret`, `token`, and `currentPassword`
+are replaced with `[REDACTED]` in log output.
 
-The `SENSITIVE_KEYS` set in `redactConfig.js` ensures that sensitive environment variable values are never logged at startup:
+### Public student API (runtime)
 
-```javascript
-const SENSITIVE_KEYS = new Set([
-  'JWT_SECRET', 'WEBHOOK_SECRET', 'MONGO_URI', 'MONGODB_URI',
-  'SMTP_PASS', 'REDIS_PASSWORD'
-]);
-```
+The public student endpoint projection is enforced at the controller level.
+**Test coverage:** `tests/studentPiiProtection.test.js` asserts that
+`parentEmail`, `parentPhone`, `totalPaid`, `remainingBalance`, `feeAmount`,
+and `studentId` are absent from `GET /api/students/public/:studentId` responses.
 
-Startup config logging uses `redactConfig(cfg)` to replace these values with `'[REDACTED]'`.
+### PII encryption at rest (migration)
 
-### API Error Response Redaction
+`backend/migrations/029_encrypt_student_pii.js` encrypts `parentEmail` and
+`parentPhone` using AES-256-GCM. The migration is idempotent (detects the
+`enc:` prefix) and requires `STUDENT_PII_ENCRYPTION_KEY` (64-char hex) to be
+set before running. Values already encrypted are skipped without being logged.
 
-API error responses must never include L4 field values. Acceptable in an error:
-```json
-{ "error": "Student not found", "code": "NOT_FOUND" }
-```
+### Secret scan (CI)
 
-Not acceptable:
-```json
-{ "error": "parentEmail abc@example.com is already registered" }
-```
+The `secret-scan-repo` CI job runs `node scripts/scan-repo-secrets.js` on every
+push to detect accidentally committed Stellar secret keys (strings that match
+the `S...` keypair format) in tracked files.
 
-Error messages should reference fields by name, not by value. Enforce this in controller code — never interpolate L4 field values into error message strings.
-
-### Webhook Payload Redaction
-
-By default, `buildWebhookPayload.js` limits the fields sent in webhook payloads to a safe allow-list (`webhookPayloadConfig.allowedFields`). L4 fields (`txHash`, `senderAddress`, `studentId`, `memo`) are **excluded by default**. Schools can opt in by explicitly adding these fields to their `webhookPayloadConfig.allowedFields` setting — this opt-in is logged in the audit trail.
+The `secret-scan` CI job runs `node scripts/scan-example-secrets.js` on
+`.env.example` and similar files to detect secret material that might have been
+copied in without sanitisation.
 
 ---
 
-## Encryption at Rest
+## Masking and Safe Examples
 
-| Data | Mechanism | Key Source | Migration |
-|------|-----------|------------|-----------|
-| `Student.parentEmail` | AES-256-GCM | `STUDENT_PII_ENCRYPTION_KEY` | 029 |
-| `Student.parentPhone` | AES-256-GCM | `STUDENT_PII_ENCRYPTION_KEY` | 029 |
-| `Payment.memo` | AES-256-GCM | `PAYMENT_MEMO_ENCRYPTION_KEY` | 011 |
-| `School.webhookSecret` | AES-256-GCM | `WEBHOOK_SECRET_ENCRYPTION_KEY` | 017, 021 |
-| `School.mfaSecret` | AES-256-GCM | Derived from `JWT_SECRET` | — |
+When writing tests, documentation, or issue comments that need to reference
+sensitive-looking data, use the placeholder values below. These are
+recognisably fake and will not trigger secret scans.
 
-Fields marked **not yet encrypted** but classified L4 are tracked in the encryption migration backlog:
+| Data type | Safe placeholder |
+|-----------|-----------------|
+| Student ID | `STU001`, `STU-EXAMPLE-01` |
+| Parent email | `parent@example.com` |
+| Parent phone | `+1-555-000-1234` |
+| Stellar public key (school) | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` |
+| Stellar public key (parent) | `GPARENT000000000000000000000000000000000000000000000000PA` |
+| JWT secret | `ci-test-jwt-secret-not-used-in-production` |
+| Transaction hash | `abc123def456...` (ellipsis or hex placeholder) |
+| MongoDB URI | `mongodb://localhost:27017/stellaredupay?replicaSet=rs0` |
+| Encryption key (hex) | `0000...0000` (64 zeroes, clearly not real) |
 
-| Field | Priority | Tracking |
-|-------|----------|---------|
-| `Student.name` | Medium | Follow-up migration needed |
-| `Student.parentName` | Medium | Follow-up migration needed |
-| `Student.dateOfBirth` | High | Sensitive demographic data |
-| `Student.gender` | High | Sensitive demographic data |
-| `Student.contactNumber` | Medium | Follow-up migration needed |
-| `School.adminEmail` | Medium | Follow-up migration needed |
+When a code example needs to show a redacted value, use:
 
----
+```js
+// Log safe — no PII, no secrets:
+logger.info('Payment recorded', {
+  schoolId: req.schoolId,
+  studentClass: student.class,
+  status: payment.status,
+});
 
-## Redact Utility (`redactPii`)
-
-The `backend/src/utils/redactConfig.js` module exports `redactConfig` for environment variables. For structured data objects (log payloads, error details, API responses), use the `redactPii` utility:
-
-```javascript
-// backend/src/utils/redactConfig.js
-const { redactPii } = require('../utils/redactConfig');
-
-// Redacts all L4 fields from a data object before logging
-const safePayload = redactPii(paymentRecord);
-logger.info('Payment processed', safePayload);
-```
-
-The `redactPii(data)` function accepts an object or array of objects and returns a deep copy with all L4 field values replaced by `'[REDACTED]'`. It uses the `PII_FIELDS` export from `redactConfig.js`.
-
-```javascript
-// Fields redacted by redactPii()
-const PII_FIELDS = new Set([
-  // Student PII
-  'parentEmail', 'parentPhone', 'parentName', 'dateOfBirth', 'gender',
-  'contactNumber', 'name', 'parentEmailHash',
-  // Payment financial identifiers
-  'txHash', 'memo', 'senderAddress',
-  // School secrets
-  'webhookSecret', 'mfaSecret', 'mfaBackupCodes',
-  // Auth fields
-  'password', 'secret', 'token', 'mfaCode', 'backupCode',
-  'currentPassword', 'confirmPassword',
-  // School contact
-  'adminEmail',
-]);
+// WRONG — never do this:
+// logger.info('Payment recorded', { studentId, parentEmail, txHash });
 ```
 
 ---
 
-## Compliance Notes
+## Allowed Destinations by Category
 
-- **GDPR / NDPA (Nigeria Data Protection Act):** `parentEmail`, `parentPhone`, `parentName`, `dateOfBirth`, `gender` are personal data. Access must be limited to the school to which the student belongs. Requests for data deletion must trigger the student soft-delete flow (which does not hard-delete, but marks the record for PII anonymization via `piiAnonymizationScheduler.js`).
-- **Data retention:** Student PII is retained for the duration of the school's subscription plus any legally mandated period. The `piiAnonymizationScheduler.js` service handles scheduled anonymization of deleted student PII.
-- **Cross-border data transfer:** StellarEduPay does not transfer student PII to third parties (Stellar only receives `studentId` as a memo field, which is a pseudonymous identifier, not the student's name).
+| Destination | Auth secrets | Financial data | Student PII | Operational metadata |
+|-------------|:---:|:---:|:---:|:---:|
+| Application logs (stdout / file) | ❌ Never | ❌ Redacted | ❌ Redacted | ✅ Allowed |
+| Audit log (`auditlogs` collection) | ❌ Never | ✅ Allowed (internal) | ⚠️ Admin-only read | ✅ Allowed |
+| MongoDB `students` collection | N/A | ✅ Stored (encrypted) | ✅ Encrypted at rest | ✅ Allowed |
+| Outbound webhook payload | ❌ Never | ✅ Signed payload | ❌ Never | ✅ Allowed |
+| Email (receipts / reminders) | ❌ Never | ⚠️ Amount only | ⚠️ Name + school only | ✅ Allowed |
+| CSV/JSON exports (`/api/reports`) | ❌ Never | ✅ Admin-only | ❌ No raw PII | ✅ Allowed |
+| Error responses (HTTP 4xx/5xx) | ❌ Never | ❌ Never | ❌ Never | ⚠️ Code only |
+| GitHub issues / PR comments | ❌ Never | ❌ Never | ❌ Never | ✅ Allowed |
+| Prometheus metrics (`/metrics`) | ❌ Never | ⚠️ Aggregates only | ❌ Never | ✅ Allowed |
 
 ---
 
-## Related Documents and Code References
+## Retention Policy
 
-- Request logger redaction: [`backend/src/middleware/requestLogger.js`](../backend/src/middleware/requestLogger.js)
-- Redact config: [`backend/src/utils/redactConfig.js`](../backend/src/utils/redactConfig.js)
-- Student PII encryption: [`backend/src/services/studentPiiEncryption.js`](../backend/src/services/studentPiiEncryption.js)
-- Student PII encryption migration: [`backend/migrations/029_encrypt_student_pii.js`](../backend/migrations/029_encrypt_student_pii.js)
-- Payment memo encryption migration: [`backend/migrations/011_encrypt_payment_memos.js`](../backend/migrations/011_encrypt_payment_memos.js)
-- Webhook secret encryption migration: [`backend/migrations/021_encrypt_webhook_secrets.js`](../backend/migrations/021_encrypt_webhook_secrets.js)
-- PII anonymization scheduler: [`backend/src/services/piiAnonymizationScheduler.js`](../backend/src/services/piiAnonymizationScheduler.js)
-- Student PII protection tests: [`tests/studentPiiProtection.test.js`](../tests/studentPiiProtection.test.js)
-- Security threat model: [`docs/security.md`](security.md)
+| Data type | Storage location | Retention |
+|-----------|-----------------|-----------|
+| Request logs (stdout) | `logs/combined-YYYY-MM-DD.log` | 14 days (`LOG_MAX_FILES=14d`) |
+| Error logs | `logs/error-YYYY-MM-DD.log` | 14 days |
+| Audit log entries | `auditlogs` collection | TTL index; default per-deployment config |
+| Idempotency keys | `idempotencykeys` collection | 24 hours (`IDEMPOTENCY_KEY_TTL_SECONDS`) |
+| Payment intents | `paymentintents` collection | TTL index (migration 006) |
+| Reminder logs | `reminderlogs` collection | 90 days (`REMINDER_LOG_TTL_SECONDS`) |
+| Webhook delivery records | `webhookdeliveries` collection | TTL index (migration 028) |
+| Database backups | Host path (`BACKUP_DIR`) | 7 days (`RETAIN_DAYS`) |
+
+PII fields (`parentEmail`, `parentPhone`) are encrypted at rest and are
+retained as long as the student record exists. Deleting a student record
+(soft-delete via `deletedAt`) does not remove the encrypted PII; a hard
+delete of the document removes it.
+
+---
+
+## Incident and Support Handling
+
+When investigating a production issue that involves payment data or student
+records:
+
+1. **Use audit logs, not raw DB exports.** Query `GET /api/audit` with
+   appropriate date and actor filters. The audit log records who did what and
+   when without exposing raw PII fields to support staff.
+
+2. **Mask PII before sharing.** If a support ticket requires attaching a log
+   snippet or database document, redact `parentEmail`, `parentPhone`, and
+   `senderAddress` before pasting. Replace with `[REDACTED]`.
+
+3. **Never attach `.env` files or logs containing real secrets** to issue
+   trackers, Slack threads, or email. If secrets may have been exposed, treat
+   it as a security incident and rotate them immediately per the procedures in
+   [`docs/security.md`](security.md) and [`docs/operator-runbooks.md`](operator-runbooks.md).
+
+4. **Use `LOG_LEVEL=debug` only in a controlled environment.** Debug-level
+   logging may surface additional request context. Ensure debug mode is not
+   left enabled in production after investigation.

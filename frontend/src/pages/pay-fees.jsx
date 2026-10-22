@@ -3,7 +3,9 @@ import { useRef } from "react";
 import PaymentForm from "../components/PaymentForm";
 import VerifyPayment from "../components/VerifyPayment";
 import SseDegradedBanner from "../components/SseDegradedBanner";
+import NetworkStatusBanner from "../components/NetworkStatusBanner";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { useTranslation } from "react-i18next";
 
 export default function PayFees() {
@@ -16,8 +18,11 @@ export default function PayFees() {
     { n: "3", title: t("payFees.step3Title"), desc: t("payFees.step3Desc") },
   ];
 
-  // Surface degraded/reconnecting/failed banner (Issues #1054, #1078).
+  // SSE-level degraded/reconnecting/failed banner (Issues #1054, #1078).
   const { degraded, connectionStatus } = usePaymentEvents();
+
+  // Browser-level network connectivity (Issue #21).
+  const { isOnline, wasOffline } = useNetworkStatus();
 
   const handleManualVerify = () => {
     verifyPaymentRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -26,7 +31,10 @@ export default function PayFees() {
   return (
     <>
       <Head><title>{t("nav.payFees")} | {t("app.name")}</title></Head>
+      {/* SSE-level status — rendered first so it sits at the very top */}
       <SseDegradedBanner degraded={degraded} connectionStatus={connectionStatus} onManualVerify={handleManualVerify} />
+      {/* OS/browser-level network status — rendered below SSE banner */}
+      <NetworkStatusBanner isOnline={isOnline} wasOffline={wasOffline} />
 
       <div className="payfees-page">
         {/* Page header */}
@@ -54,7 +62,7 @@ export default function PayFees() {
 
         {/* Main content grid */}
         <div className="payfees-grid">
-          <PaymentForm />
+          <PaymentForm isOnline={isOnline} wasOffline={wasOffline} />
           <div ref={verifyPaymentRef}>
             <VerifyPayment />
           </div>

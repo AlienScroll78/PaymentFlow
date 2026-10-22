@@ -52,6 +52,17 @@ const PII_FIELDS = new Set([
   'adminEmail',
 ]);
 
+const SENSITIVE_LOG_KEY = /(password|secret|token|authorization|cookie|api.?key|private.?key|access.?key|refresh.?token|mfa|backup.?code|student.?id|tx.?hash|sender.?address|memo)/i;
+
+function redactLogValue(value) {
+  if (Array.isArray(value)) return value.map(redactLogValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, nestedValue]) => [
+    key,
+    SENSITIVE_LOG_KEY.test(key) ? '[REDACTED]' : redactLogValue(nestedValue),
+  ]));
+}
+
 /**
  * Redact sensitive environment config keys before logging at startup.
  * Replaces the value of any key in SENSITIVE_KEYS with '[REDACTED]'.
@@ -95,4 +106,4 @@ function redactPii(data) {
   return data;
 }
 
-module.exports = { redactConfig, redactPii, SENSITIVE_KEYS, PII_FIELDS, REQUEST_LOG_REDACT_FIELDS };
+module.exports = { redactConfig, redactPii, redactLogValue, SENSITIVE_KEYS, PII_FIELDS, REQUEST_LOG_REDACT_FIELDS };
