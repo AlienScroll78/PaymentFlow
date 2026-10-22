@@ -1,3 +1,4 @@
+  cursor: Joi.string().min(1).max(2048).optional(),
 'use strict';
 
 /**
@@ -57,7 +58,7 @@ const auditQuerySchema = Joi.object({
     .messages({ 'string.isoDate': '"startDate" must be a valid ISO 8601 date' }),
   endDate:     Joi.string().isoDate().optional()
     .messages({ 'string.isoDate': '"endDate" must be a valid ISO 8601 date' }),
-  cursor:      Joi.string().max(2048).optional()
+  cursor:      Joi.string().min(1).max(2048).optional()
     .messages({ 'string.max': '"cursor" must not exceed 2048 characters' }),
   page:        Joi.number().integer().min(1).max(10000).default(1),
   limit:       Joi.number().integer().min(1).max(200).default(50),

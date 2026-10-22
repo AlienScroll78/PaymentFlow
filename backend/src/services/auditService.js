@@ -263,7 +263,7 @@ function _verifyCursor(token, currentFilters) {
 async function getAuditLogs(filters = {}) {
   const {
     schoolId, action, targetType, performedBy, result, search,
-    startDate, endDate, cursor, page = 1, limit = 50,
+    startDate, endDate, cursor, page = 1, limit = 50, legacyOffset = false,
   } = filters;
 
   const baseQuery = { schoolId };
@@ -291,40 +291,36 @@ async function getAuditLogs(filters = {}) {
   else if (targetType)  indexHint = { schoolId: 1, targetType: 1, createdAt: -1 };
   else                  indexHint = { schoolId: 1, createdAt: -1 };
 
-  const sortSpec = search ? { score: { $meta: 'textScore' } } : { createdAt: -1, _id: -1 };
+  const sortSpec = { createdAt: -1, _id: -1 };
 
   let logs;
-  let total;
-  let usedCursor = false;
+  let total = null;
+  let hasNextPage = false;
+  let hasPreviousPage = false;
+  let nextCursor = null;
+  let cursorExpiry = null;
+  const cursorMode = !legacyOffset || Boolean(cursor);
 
-  if (cursor) {
-    // ── Cursor mode: keyset pagination (stable under inserts) ──────────────
-    // _verifyCursor throws with code='INVALID_CURSOR' if the token is bad.
-    const cursorPayload = _verifyCursor(cursor, currentFilters);
-    usedCursor = true;
-
-    const cursorDate = new Date(cursorPayload.createdAt);
-    const cursorId   = cursorPayload._id;
-
-    // Build a keyset condition that continues from where the last page ended.
-    // We use ($lt createdAt) OR (== createdAt AND $lt _id) to handle ties.
-    const keysetCondition = {
-      $or: [
-        { createdAt: { $lt: cursorDate } },
-        { createdAt: cursorDate, _id: { $lt: cursorId } },
-      ],
-    };
-
-    const pagedQuery = { ...baseQuery, ...keysetCondition };
-
-    [logs, total] = await Promise.all([
-      AuditLog.find(pagedQuery)
-        .hint(indexHint)
-        .sort(sortSpec)
-        .limit(actualLimit)
-        .lean(),
-      AuditLog.countDocuments(baseQuery),
-    ]);
+  if (cursorMode) {
+    const cursorPayload = cursor ? _verifyCursor(cursor, currentFilters) : null;
+    hasPreviousPage = Boolean(cursorPayload);
+    const pagedQuery = cursorPayload
+      ? { $and: [baseQuery, { $or: [
+        { createdAt: { $lt: new Date(cursorPayload.createdAt) } },
+        { createdAt: new Date(cursorPayload.createdAt), _id: { $lt: cursorPayload._id } },
+      ] }] }
+      : baseQuery;
+    const results = await AuditLog.find(pagedQuery)
+      .hint(indexHint)
+      .sort(sortSpec)
+      .limit(actualLimit + 1)
+      .lean();
+    hasNextPage = results.length > actualLimit;
+    logs = results.slice(0, actualLimit);
+    if (hasNextPage && logs.length > 0) {
+      nextCursor = _signCursor(logs[logs.length - 1], currentFilters);
+      cursorExpiry = new Date(Date.now() + CURSOR_TTL_MS).toISOString();
+    }
   } else {
     // ── Offset mode: classic page/skip pagination ─────────────────────────
     const skip = (actualPage - 1) * actualLimit;
@@ -340,19 +336,8 @@ async function getAuditLogs(filters = {}) {
     ]);
   }
 
-  // Build the next cursor when there are more records after this page
-  let nextCursor    = null;
-  let cursorExpiry  = null;
-  if (logs.length > 0) {
-    const lastLog     = logs[logs.length - 1];
-    const hasMore     = usedCursor
-      ? logs.length === actualLimit   // cursor mode: fetch full page → likely more
-      : (actualPage - 1) * actualLimit + logs.length < total;
-
-    if (hasMore) {
-      nextCursor   = _signCursor(lastLog, currentFilters);
-      cursorExpiry = new Date(Date.now() + CURSOR_TTL_MS).toISOString();
-    }
+  if (cursorMode) {
+    return { logs, limit: actualLimit, nextCursor, cursorExpiry, hasPreviousPage, hasNextPage };
   }
 
   return {
