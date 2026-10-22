@@ -56,6 +56,22 @@ const ha = {
     staff: "Matsayi",
   },
 
+  pagination: {
+    label: "Shafin Kewayawa",
+    firstPage: "Shafi na farko",
+    lastPage: "Shafi na ƙarshe",
+    previousPage: "Shafi na baya",
+    nextPage: "Shafi na gaba",
+    firstPageAria: "Tafi shafi na farko cikin {{total}}",
+    lastPageAria: "Tafi shafi na ƙarshe cikin {{total}}",
+    previousPageAria: "Tafi shafi na baya (shafi {{page}} na {{total}})",
+    nextPageAria: "Tafi shafi na gaba (shafi {{page}} na {{total}})",
+    pageAria: "Shafi {{page}} na {{total}}",
+    ellipsis: "Ƙarin shafuka",
+    rangeOf: "{{start}}–{{end}} daga {{total}} {itemLabel}",
+    shortcutHint: "Danna g sannan lamba don tafi wannan shafin",
+  },
+
   time: {
     never: "Ba a taɓa",
     justNow: "Yanzu nan",
@@ -199,6 +215,11 @@ const ha = {
 
   components: {
     testnetBanner: "TESTNET — Kada ka aika kuɗi na gaske",
+  },
+
+  offlineBanner: {
+    message: "Ba ka da haɗin intanet.",
+    submsg: "An kashe ayyukan biyan kuɗi. Bayanan za su sabunta kai tsaye lokacin da ka sake haɗawa.",
   },
 };
 
