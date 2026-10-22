@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Graceful shutdown with in-flight draining (#296)**: Added step-by-step duration logging for graceful shutdown sequence, bounded in-flight HTTP request and BullMQ queue draining, and aligned Kubernetes `preStop` hook in deployment manifests.
-- **Harden webhook signature verification (#278)**: Replaced HMAC verification with constant-time equality checks (`timingSafeEqual`), enforced 5-minute maximum timestamp skew with HTTP 401 rejections, replay attack protection, and audit logging.
-- **Transactional outbox pattern (#277)**: Integrated atomic transactional outbox writes in payment mutation paths alongside payments in the same MongoDB session with retry limits, exponential backoff, and dead-letter handling.
-- **Idempotency key persistence (#276)**: Enforced `X-Idempotency-Key` header validation on mutating payment routes (`/intent`, `/submit`, `/verify`), caching responses in 24-hour TTL store and returning 409 Conflict for concurrent in-flight requests.
+- **Request correlation ID middleware (#275)**: Integrated UUID v4 request correlation ID middleware attached to all incoming API requests and outgoing responses (`X-Request-ID` and `X-Correlation-ID`), propagating across logs via `AsyncLocalStorage`, outbound HTTP calls, and BullMQ background queue jobs.
+- **Payment error taxonomy (#274)**: Defined a structured, machine-readable error taxonomy in `docs/error-codes.md` and registered `x-error-codes` extension in OpenAPI configuration (`swagger.js`) mapping status, retryability, and safe message templates.
+- **Frontend contract tests against OpenAPI (#273)**: Added OpenAPI spec validation and contract tests in `tests/apiContractTests.test.js` validating schema responses and error taxonomy against canonical fixtures.
+- **Bundle size budget & gzip tracking (#272)**: Added 200KB gzip threshold enforcement to `scripts/bundle-budget.js` with per-route gzip reporting in the CI bundle analysis summary.
 
 - **Migrations 019–025 documentation (#1388)**: CHANGELOG and `docs/migrations.md` previously had no record of what migrations `019` through `025` do. Documented here so operators upgrading can tell what will run before they run `npm run migrate`:
   - **`019_add_reminder_time_window`** — Backfills `schools.settings.reminderTimeWindow` to `{ startHour: 8, endHour: 18 }` for any school missing it. Data-only, no index changes. Safe during a rolling deploy; idempotent (`$exists: false` filter). No prerequisites.
