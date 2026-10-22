@@ -59,6 +59,16 @@ const webhookDeliverySchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    // Pre-computed HTTP status class label for this delivery attempt.
+    // Values mirror classifyStatus() in webhookMetrics.js:
+    //   '2xx' | '4xx' | '5xx' | 'redirect_blocked' | 'timeout' |
+    //   'ssrf_blocked' | 'replay_blocked' | 'network_error'
+    // Stored here so operators can run per-class delivery queries without
+    // re-parsing statusCode or the error string at query time.
+    responseClass: {
+      type: String,
+      default: null,
+    },
     responseBody: {
       type: String,
       default: null,

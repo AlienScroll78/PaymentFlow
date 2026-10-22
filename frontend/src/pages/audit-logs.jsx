@@ -1,21 +1,17 @@
 import { useState, useEffect } from "react";
 import { getAuditLogs } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
+import { useAbortController } from "../hooks/useAbortController";
 import {
   IconChevronLeft, IconChevronRight, IconAlertTriangle, IconCheck,
 } from "../components/Icons";
+import EmptyState from "../components/EmptyState";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import EmptyState from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
-
-function formatTimestamp(isoString, t) {
-  if (!isoString) return t("auditLogs.notAvailable");
-  return new Date(isoString).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
+import { useAuditFilters } from "../hooks/useAuditFilters";
 
 const ACTION_LABELS = {
   student_create:       "auditLogs.event.student_create",
@@ -48,26 +44,8 @@ function AuditLogsContent() {
   const [cursorStack, setCursorStack] = useState([]); // Stack of previous cursors for back button
   const [expandedId, setExpandedId]   = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
-
-  const [actionFilter, setActionFilter]         = useState("");
-  const [targetTypeFilter, setTargetTypeFilter] = useState("");
-  const [resultFilter, setResultFilter]         = useState("");
-  const [startDate, setStartDate]               = useState("");
-  const [endDate, setEndDate]                   = useState("");
-  const [actorIdInput, setActorIdInput]         = useState("");
-  const [actorIdFilter, setActorIdFilter]       = useState("");
-  const [searchInput, setSearchInput]           = useState("");
-  const [searchFilter, setSearchFilter]         = useState("");
-
-  // Debounce the free-text inputs so we don't fire a request per keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => setActorIdFilter(actorIdInput.trim()), 350);
-    return () => clearTimeout(t);
-  }, [actorIdInput]);
-  useEffect(() => {
-    const t = setTimeout(() => setSearchFilter(searchInput.trim()), 350);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  const { filters, setFilter, clearAll, apiParams } = useAuditFilters();
+  const [copyStatus, setCopyStatus] = useState("");
 
   const fetchLogs = (cursor = null) => {
     const isLoadMore = cursor !== null && cursor !== undefined;
@@ -79,19 +57,8 @@ function AuditLogsContent() {
       setCursorStack([]);
     }
     setError(null);
-    const params = { limit: 50 };
+    const params = { ...apiParams };
     if (cursor) params.cursor = cursor;
-    if (actionFilter)     params.action     = actionFilter;
-    if (targetTypeFilter) params.targetType = targetTypeFilter;
-    if (resultFilter)     params.result     = resultFilter;
-    if (actorIdFilter)    params.performedBy = actorIdFilter;
-    if (searchFilter)     params.search     = searchFilter;
-    if (startDate)        params.startDate  = new Date(startDate).toISOString();
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      params.endDate = end.toISOString();
-    }
     getAuditLogs(params)
       .then(({ data }) => {
         if (isLoadMore) {
@@ -104,6 +71,8 @@ function AuditLogsContent() {
         setNextCursor(data.nextCursor);
       })
       .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
         setError(getErrorMessage(err.response?.data?.code, err.response?.data?.error) || t("auditLogs.failedToLoad"));
       })
       .finally(() => {
@@ -115,7 +84,19 @@ function AuditLogsContent() {
       });
   };
 
-  useEffect(() => { fetchLogs(1); }, [actionFilter, targetTypeFilter, resultFilter, actorIdFilter, searchFilter, startDate, endDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchLogs(null); }, [
+    filters.action, filters.targetType, filters.result, filters.startDate, filters.endDate,
+    apiParams.performedBy, apiParams.search,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function copyFilterUrl() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy unavailable");
+    }
+  }
 
   return (
     <>
@@ -220,11 +201,25 @@ function AuditLogsContent() {
         <div className="card">
           {/* Filters */}
           <div className="al-filters">
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "0.5rem" }}>
+              <button type="button" className="btn btn-ghost" onClick={copyFilterUrl}>
+                Copy filter URL
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={clearAll}
+                disabled={!Object.values(filters).some(Boolean)}
+              >
+                Reset all filters
+              </button>
+              {copyStatus && <span role="status" style={{ fontSize: "0.75rem" }}>{copyStatus}</span>}
+            </div>
             <div>
               <label className="al-filter-label">{t("auditLogs.filterActionLabel")}</label>
               <select
-                value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
+                value={filters.action}
+                onChange={e => setFilter("action", e.target.value)}
                 className="al-filter-input"
               >
                 <option value="">{t("auditLogs.allActions")}</option>
@@ -237,8 +232,8 @@ function AuditLogsContent() {
             <div>
               <label className="al-filter-label">{t("auditLogs.filterTargetTypeLabel")}</label>
               <select
-                value={targetTypeFilter}
-                onChange={e => setTargetTypeFilter(e.target.value)}
+                value={filters.targetType}
+                onChange={e => setFilter("targetType", e.target.value)}
                 className="al-filter-input"
               >
                 <option value="">{t("auditLogs.allTypes")}</option>
@@ -251,8 +246,8 @@ function AuditLogsContent() {
             <div>
               <label className="al-filter-label">{t("auditLogs.filterResultLabel")}</label>
               <select
-                value={resultFilter}
-                onChange={e => setResultFilter(e.target.value)}
+                value={filters.result}
+                onChange={e => setFilter("result", e.target.value)}
                 className="al-filter-input"
                 aria-label={t("auditLogs.filterByResult")}
               >
@@ -266,8 +261,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterActorIdLabel")}</label>
               <input
                 type="text"
-                value={actorIdInput}
-                onChange={e => setActorIdInput(e.target.value)}
+                value={filters.actorId}
+                onChange={e => setFilter("actorId", e.target.value)}
                 placeholder={t("auditLogs.actorPlaceholder")}
                 className="al-filter-input"
               />
@@ -277,8 +272,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterSearchLabel")}</label>
               <input
                 type="text"
-                value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
+                value={filters.search}
+                onChange={e => setFilter("search", e.target.value)}
                 placeholder={t("auditLogs.searchPlaceholder")}
                 className="al-filter-input"
               />
@@ -288,8 +283,8 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterFromLabel")}</label>
               <input
                 type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
+                value={filters.startDate}
+                onChange={e => setFilter("startDate", e.target.value)}
                 className="al-filter-input"
               />
             </div>
@@ -298,22 +293,16 @@ function AuditLogsContent() {
               <label className="al-filter-label">{t("auditLogs.filterToLabel")}</label>
               <input
                 type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
+                value={filters.endDate}
+                onChange={e => setFilter("endDate", e.target.value)}
                 className="al-filter-input"
               />
             </div>
           </div>
 
-          {/* Alerts */}
-          {error && (
-            <div className="card-body">
-              <div role="alert" className="alert alert-danger">
-                <IconAlertTriangle size={16} />
-                <span>{error}</span>
-              </div>
-            </div>
-          )}
+          {/* Table — loading / error / empty / data */}
+          {(() => {
+            const hasActiveFilters = Object.values(filters).some(Boolean);
 
           {/* Table */}
           {loading ? (
@@ -389,7 +378,11 @@ function AuditLogsContent() {
                     return (
                       <tr key={log._id}>
                         <td style={{ whiteSpace: "nowrap", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-                          {formatTimestamp(log.createdAt, t)}
+                          <TimestampDisplay
+                            iso={log.createdAt}
+                            mode={DISPLAY_MODE.UTC}
+                            fallback={t("auditLogs.notAvailable")}
+                          />
                         </td>
                         <td style={{ fontWeight: 500, fontSize: "0.875rem" }}>{getActionLabel(log.action, t)}</td>
                         <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>{log.performedBy}</td>
@@ -433,7 +426,8 @@ function AuditLogsContent() {
                 </tbody>
               </table>
             </div>
-          )}
+          );
+          })()}
 
           {/* Pagination */}
           {!loading && nextCursor && (
@@ -469,5 +463,13 @@ function AuditLogsContent() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function AuditLogsPage() {
+  return (
+    <RequireAdmin>
+      <AuditLogsContent />
+    </RequireAdmin>
   );
 }
