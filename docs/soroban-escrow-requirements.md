@@ -1,5 +1,10 @@
 # Soroban Escrow Contract Requirements
 
+> **Issue:** [#300 — Define Soroban smart contract requirements for fee escrow](https://github.com/onlyonee1/PaymentFlow/issues/300)
+> **Status:** Draft — awaiting stakeholder approval before implementation begins
+> **Author:** Platform Engineering
+> **Last updated:** 2026-10-20
+
 This document defines the requirements for a Soroban smart contract that provides
 escrow semantics for PaymentFlow school fee payments. It is intended to serve as
 the approved baseline before implementation begins.
@@ -17,6 +22,7 @@ the approved baseline before implementation begins.
 - [Invalid Call Behaviors](#invalid-call-behaviors)
 - [Replay Protection](#replay-protection)
 - [Fee Behavior](#fee-behavior)
+- [Fee Distribution](#fee-distribution)
 - [Timeout and Expiry](#timeout-and-expiry)
 - [Dispute Handling](#dispute-handling)
 - [Events](#events)
@@ -387,6 +393,110 @@ If the payer deposits an amount exceeding the required fee:
 - The backend records `feeValidationStatus: 'overpaid'` and `excessAmount`.
 - The school receives the full deposited amount (overpayment goes to school, v1 behavior).
 - A future v2 requirement may split the release (exact fee to school + refund of excess).
+
+---
+
+## Fee Distribution
+
+This section specifies how the escrowed amount is split between parties at the
+moment funds leave the contract (i.e. on `release()` or `resolveDispute("release")`).
+In v1 the contract transfers the full deposited amount in a single operation. The
+distribution logic described here is partially enforced on-chain and partially
+reconciled off-chain by the backend.
+
+### Parties in the Distribution
+
+| Party | Role | How funds reach them |
+|---|---|---|
+| **School (Beneficiary)** | Receives the net fee amount | Direct on-chain transfer from contract on `release()` |
+| **Platform (Operator)** | Receives a platform service fee | Off-chain settlement via backend reconciliation in v1; on-chain split in v2 |
+| **Gas Reserve** | Covers Stellar network transaction fees for future contract operations | Funded by the platform from its own XLM reserve; NOT deducted from the escrow amount |
+
+### v1 Distribution Model (On-Chain Single Transfer)
+
+In v1 the contract performs a **single atomic transfer** of the full escrowed amount
+to the beneficiary on release. Platform fee extraction is handled off-chain:
+
+```
+Escrowed amount (e.g. 500 USDC)
+        │
+        ├─ release() called
+        │
+        ▼
+School Wallet receives 500 USDC  ← full amount, on-chain
+        │
+        ▼
+Backend calculates platform fee:  500 × PLATFORM_FEE_BPS / 10000
+Backend records:  platformFeeAmount, schoolNetAmount in Payment record
+Platform invoices school off-chain (monthly batch settlement)
+```
+
+**Rationale for v1 off-chain settlement:** A two-output on-chain split requires the
+platform wallet to have a trustline for USDC, and increases contract complexity.
+The v1 approach ships sooner without these dependencies.
+
+### Platform Fee Configuration
+
+| Parameter | Default | Description |
+|---|---|---|
+| `PLATFORM_FEE_BPS` | `50` | Platform fee in basis points (50 bps = 0.5%) |
+| `PLATFORM_FEE_MIN` | `0.01 USDC` | Minimum fee charged regardless of amount |
+| `PLATFORM_FEE_MAX` | `10.00 USDC` | Fee cap to protect high-value payments |
+
+These values are configured per-school via the school settings model and NOT stored
+in the Soroban contract in v1. The backend computes `platformFeeAmount` after
+observing the `Released` event.
+
+### Gas Reserve
+
+The Soroban contract itself must maintain a minimum XLM balance to cover:
+- Soroban contract storage rent (persistent storage TTL renewal)
+- Network transaction fees for arbiter-initiated operations (`cancel`, `resolveDispute`)
+
+The **Platform Operator** is responsible for funding the contract's XLM reserve.
+The escrowed USDC/XLM is never used for rent. The backend's health check SHOULD
+include a check of the contract account's XLM balance against a minimum threshold
+(recommended: 5 XLM above the base reserve).
+
+### Overpayment Distribution
+
+If `deposited_amount > intent.feeAmount`:
+
+| Party | Amount | Notes |
+|---|---|---|
+| School | Full deposited amount | v1: school receives all, including excess |
+| Platform | `deposited_amount × PLATFORM_FEE_BPS / 10000` | Calculated on full deposited amount |
+| Parent | Nothing | No automatic refund of excess in v1 |
+
+The backend records `feeValidationStatus: 'overpaid'` and `excessAmount` in the
+Payment record. School admin is notified and may manually initiate a refund for
+the excess via the existing refund workflow.
+
+### Partial Payment (Underpayment) Distribution
+
+If `deposited_amount < intent.feeAmount`:
+
+- The contract holds the partial amount until `release()` is called.
+- Release is still valid — the school receives whatever was deposited.
+- The backend records `feeValidationStatus: 'underpaid'` and `remainingBalance`.
+- `feePaid` is NOT set to `true` until cumulative payments meet `feeAmount`.
+- Multiple escrow deposits for the same student (sequential, not concurrent) are
+  allowed once the prior escrow reaches a terminal state.
+
+### v2 Distribution (Planned, Out of Scope)
+
+A future v2 may implement an on-chain split within `release()`:
+
+```rust
+// Conceptual v2 pseudocode
+let platform_fee = deposited_amount * PLATFORM_FEE_BPS / 10000;
+let school_net   = deposited_amount - platform_fee;
+token.transfer(&env, &contract, &platform_wallet, platform_fee);
+token.transfer(&env, &contract, &beneficiary,     school_net);
+```
+
+This requires the platform wallet address and fee BPS to be stored as contract
+instance storage, settable only by the Contract Admin.
 
 ---
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getAuditLogs } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
+import { useAbortController } from "../hooks/useAbortController";
 import {
   IconChevronLeft, IconChevronRight, IconAlertTriangle, IconCheck,
 } from "../components/Icons";
@@ -52,6 +53,10 @@ function AuditLogsContent() {
   const [searchInput, setSearchInput]           = useState("");
   const [searchFilter, setSearchFilter]         = useState("");
 
+  // Issue #254 — abort in-flight audit-log requests when the component
+  // unmounts to prevent stale responses from updating the wrong route's state.
+  const { signal } = useAbortController();
+
   // Debounce the free-text inputs so we don't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setActorIdFilter(actorIdInput.trim()), 350);
@@ -85,7 +90,7 @@ function AuditLogsContent() {
       end.setHours(23, 59, 59, 999);
       params.endDate = end.toISOString();
     }
-    getAuditLogs(params)
+    getAuditLogs(params, { signal })
       .then(({ data }) => {
         if (isLoadMore) {
           setLogs(prev => [...prev, ...data.data]);
@@ -97,6 +102,8 @@ function AuditLogsContent() {
         setNextCursor(data.nextCursor);
       })
       .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
         setError(getErrorMessage(err.response?.data?.code, err.response?.data?.error) || t("auditLogs.failedToLoad"));
       })
       .finally(() => {

@@ -16,6 +16,7 @@ const {
   recordPayment,
   validatePaymentWithDynamicFee,
   determineConfirmationState,
+  pollForLedgerInclusion,
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
 const { transition: transitionPayment } = require('../services/paymentTransitionService');
@@ -248,6 +249,8 @@ async function submitTransaction(req, res, next) {
       initialUpdates: { txHash: normalizedHash, transactionHash: normalizedHash },
     })).payment;
 
+    // Submit the XDR to Horizon. A submission error (network/SDK) means the tx
+    // was never broadcast — fail immediately without polling.
     let txResponse;
     try {
       txResponse = await withStellarRetry(() => server.submitTransaction(tx), { label: 'submitTransaction' });
@@ -298,8 +301,9 @@ async function submitTransaction(req, res, next) {
     res.json({
       verified: true,
       hash: normalizedHash,
-      ledger: txResponse.ledger,
+      ledger: pollResult.ledger || txResponse.ledger,
       status: 'SUCCESS',
+      confirmationState: pollResult.confirmationState,
       explorerUrl: `https://stellar.expert/explorer/${network}/tx/${transactionHash}`,
     });
   } catch (err) {

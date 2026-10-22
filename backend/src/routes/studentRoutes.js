@@ -28,6 +28,7 @@ const { requireAdminAuth, requireSchoolAuth } = require('../middleware/auth');
 const { auditContext } = require('../middleware/auditContext');
 const { bulkImportLimiter } = require('../middleware/rateLimiter');
 const streamingCsvUpload = require('../middleware/streamingCsvUpload');
+const { contractPaused } = require('../middleware/contractPaused');
 
 router.use(resolveSchool);
 
@@ -56,6 +57,6 @@ router.post('/:studentId/reset-payment', requireAdminAuth, auditContext, validat
 router.post('/:studentId/reconcile', requireAdminAuth, auditContext, validateStudentIdParam, reconcileStudent);
 router.post('/:studentId/reminders/resubscribe', requireAdminAuth, auditContext, validateStudentIdParam, resubscribeReminders);
 router.get('/:studentId/fee-history', requireAdminAuth, validateStudentIdParam, getFeeHistory);
-router.post('/:studentId/credit-adjustments', requireAdminAuth, validateStudentIdParam, auditContext, adjustStudentCredit);
+router.post('/:studentId/credit-adjustments', requireAdminAuth, validateStudentIdParam, auditContext, contractPaused, adjustStudentCredit);
 
 module.exports = router;

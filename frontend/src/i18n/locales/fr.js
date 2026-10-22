@@ -277,6 +277,7 @@ const fr = {
     verifying: "Vérification…",
     submit: "Vérifier la transaction",
     verificationFailed: "Échec de la vérification. Vérifiez le hash de transaction et réessayez.",
+    alreadyCreated: "Ce paiement a déjà été créé. Aucun doublon n'a été enregistré.",
     checkNetworkStatus: "Vérifier le statut du réseau Stellar ↗",
     transactionFound: "Transaction trouvée",
     amount: "Montant",

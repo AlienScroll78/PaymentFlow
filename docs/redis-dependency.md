@@ -120,3 +120,68 @@ The metrics registry exports the following counters and gauges to distinguish no
 # High cache outage rate indicates Redis connection or latency degradation
 rate(cache_outages_total[5m]) > 0.05
 ```
+
+---
+
+## 7. Startup Retry Policy (Issue #286)
+
+When `REDIS_HOST` is configured, the application can wait for Redis to become
+available before deciding whether to start in degraded mode or abort.
+
+### `waitForRedis(timeoutMs, retryIntervalMs)`
+
+Located in `backend/src/config/redisClient.js`, this function performs bounded
+startup probing with exponential backoff:
+
+| Parameter | Default | Source |
+|-----------|---------|--------|
+| `timeoutMs` | `30 000` ms | `REDIS_STARTUP_TIMEOUT_MS` env var |
+| `retryIntervalMs` (initial) | `500` ms | hardcoded constant |
+| Max interval | `5 000` ms | hardcoded constant |
+
+**Retry schedule:**
+
+| Attempt | Wait before attempt |
+|---------|-------------------|
+| 1 | immediate |
+| 2 | 500 ms |
+| 3 | 1 000 ms |
+| 4 | 2 000 ms |
+| 5+ | 5 000 ms (capped) |
+
+If the budget expires:
+- `REDIS_REQUIRED=false` — application continues in **degraded mode**: rate
+  limiting falls back to in-process counters, BullMQ falls back to MongoDB
+  retry backend, other components degrade per the classification table below.
+- `REDIS_REQUIRED=true` — the caller (app startup) should not accept traffic
+  (readiness probe returns 503) until Redis becomes available.
+
+Returns `{ connected: boolean, attempts: number, reason?: string }`.
+
+---
+
+## 8. Degradation Classification (Issue #286)
+
+Every Redis-dependent component in PaymentFlow is classified by its criticality
+so on-call engineers know what degrades during a Redis outage.
+
+| Component | File | Criticality | Degraded Behavior |
+|-----------|------|-------------|-------------------|
+| BullMQ transaction retry queue | `src/queue/transactionRetryQueue.js` | **CRITICAL** | Automatically falls back to MongoDB-backed retry service (`retryServiceSelector.js`) |
+| BullMQ report generation queue | `src/queue/reportQueue.js` | **CRITICAL** | Returns HTTP 503 `QUEUE_UNAVAILABLE` — report jobs cannot be enqueued until Redis is restored |
+| Rate limiting | `src/middleware/rateLimiter.js` | **DEGRADABLE** | Falls back to in-process sliding-window counter per replica; limits are not coordinated across replicas |
+| Auth IP-block tracking | `src/middleware/auth.js` | **DEGRADABLE** | Falls back to in-process `NodeCache`; blocks are not coordinated across replicas |
+| Distributed lock | `src/services/distributedLock.js` | **DEGRADABLE** | Operations proceed without distributed lock; concurrent execution risk for lock-guarded jobs |
+| Idempotency key store | `src/services/idempotencyStore.js` | **DEGRADABLE** | Falls back to MongoDB-backed idempotency store |
+| Session / read-through cache | `src/cache.js` | **DEGRADABLE** | Falls back to `NodeCache` in-process store; cache is not shared across replicas |
+| Leader election | `src/services/leaderElection.js` | **DEGRADABLE** | All replicas act as leader; background jobs may run on multiple instances |
+| SSE pub/sub | `src/services/sseService.js` | **OPTIONAL** | SSE events are only delivered to the local replica's connected clients |
+
+**Impact summary during a Redis outage:**
+
+- Users can still log in and make payments (MongoDB is the authoritative store).
+- Rate limiting becomes per-replica only — burst protection is weakened.
+- Failed payment retries switch to MongoDB backend automatically.
+- Real-time SSE notifications may be missed if the client is connected to a
+  different replica.
+- Report generation is temporarily unavailable (returns HTTP 503).

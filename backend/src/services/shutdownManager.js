@@ -101,6 +101,14 @@ async function closeQueues() {
       const retryQueue = require('../services/bullMQRetryService');
       if (retryQueue.shutdownQueue) await retryQueue.shutdownQueue();
     }},
+    { name: 'reportQueue', fn: async () => {
+      const reportQueue = require('./reportQueueService');
+      if (reportQueue.stopWorker) await reportQueue.stopWorker();
+    }},
+    { name: 'genericDeadLetterQueues', fn: async () => {
+      const deadLetterQueue = require('../queue/deadLetterQueue');
+      if (deadLetterQueue.closeDeadLetterQueues) await deadLetterQueue.closeDeadLetterQueues();
+    }},
   ];
 
   for (const op of closeOps) {

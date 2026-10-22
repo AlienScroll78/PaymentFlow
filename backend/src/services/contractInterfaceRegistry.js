@@ -69,6 +69,7 @@ class UnknownInterfaceError extends Error {
  * that specific entry point's signature; other interfaces remain at _V1.
  */
 const INTERFACE_IDS = Object.freeze({
+  VERSION: 'IFACE_VERSION_V1',
   INITIALIZE: 'IFACE_INITIALIZE_V1',
   DEPOSIT: 'IFACE_DEPOSIT_V1',
   RELEASE: 'IFACE_RELEASE_V1',
@@ -269,6 +270,17 @@ function getInterfaceIds() {
 // ---------------------------------------------------------------------------
 // Bootstrap: register all v1 interfaces at module load time
 // ---------------------------------------------------------------------------
+
+registerInterface(INTERFACE_IDS.VERSION, {
+  entryPoint: 'version',
+  version: CONTRACT_VERSION,
+  description:
+    'Read-only (view) function that returns the deployed contract\'s semantic version string. ' +
+    'Requires no authorisation and modifies no state. Used by the backend compatibility adapter ' +
+    '(contractVersionAdapter.js) to determine which call-builder set to use at runtime.',
+  input: null,
+  output: { version: 'string' },
+});
 
 registerInterface(INTERFACE_IDS.INITIALIZE, {
   entryPoint: 'initialize',

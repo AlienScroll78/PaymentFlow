@@ -15,7 +15,7 @@ rule_files:
   - "alerts/queue_backpressure.yml"
   - "alerts/backup.yml"
   - "alerts/transaction_queue.yml"
-  - "alerts/payment_reconciliation.yml"
+  - "alerts/dead_letter_queue.yml"
   - "alerts/leader_election.yml"
   - "alerts/slo.yml"
 

@@ -40,6 +40,7 @@ async function getAuditLogsEndpoint(req, res, next) {
       cursor: cursor || null,
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 50,
+      legacyOffset: req.legacyOffsetPagination,
     });
 
     res.json(auditResult);
