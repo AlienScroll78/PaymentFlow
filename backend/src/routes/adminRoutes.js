@@ -24,6 +24,7 @@ const {
   listDeadLetterJobs,
   getDeadLetterJobDetails,
   replayDeadLetterJob,
+  replayQueueDeadLetterJob,
 } = require('../controllers/bullMQAdminController');
 const {
   listDeadLetterEvents,
@@ -66,6 +67,7 @@ router.get('/retry-queue/stats', requireAdminAuth, getQueueStats);
 router.get('/retry-queue/dlq', requireAdminAuth, listDeadLetterJobs);
 router.get('/retry-queue/dlq/:jobId', requireAdminAuth, getDeadLetterJobDetails);
 router.post('/retry-queue/dlq/:jobId/replay', requireAdminAuth, auditContext, replayDeadLetterJob);
+router.post('/retry-queue/dlq/:queue/:jobId/replay', requireAdminAuth, auditContext, replayQueueDeadLetterJob);
 
 // Outbox dead-letter queue admin endpoints (Issue #1339)
 router.get('/outbox/dead-letter', requireAdminAuth, listDeadLetterEvents);

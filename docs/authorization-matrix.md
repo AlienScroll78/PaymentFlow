@@ -183,3 +183,129 @@ The `requireSchoolAuth` middleware enforces tenant isolation automatically:
 | Dispute routes | `backend/src/routes/disputeRoutes.js` |
 | Audit routes | `backend/src/routes/auditRoutes.js` |
 | Report routes | `backend/src/routes/reportRoutes.js` |
+
+---
+
+### Reconciliation Admin (`/api/admin/reconciliation/*`)
+
+> Added in Issue #283.
+
+| Method | Endpoint | Auth Level | Roles | Cross-School | Ownership Check |
+|--------|----------|-----------|-------|-------------|----------------|
+| `POST` | `/api/admin/reconciliation/run` | SUPER_ADMIN | admin, super_admin | Yes | No |
+| `GET` | `/api/admin/reconciliation` | SUPER_ADMIN | admin, super_admin | Yes | No |
+| `PATCH` | `/api/admin/reconciliation/:id` | SUPER_ADMIN | admin, super_admin | Yes | No |
+
+---
+
+### Analytics (`/api/analytics/*`)
+
+> Added in Issue #283.
+
+| Method | Endpoint | Auth Level | Roles | Cross-School | Ownership Check |
+|--------|----------|-----------|-------|-------------|----------------|
+| `GET` | `/api/analytics` | SCHOOL_ADMIN | owner, finance | No | No |
+| `GET` | `/api/analytics/summary` | SCHOOL_ADMIN | owner, finance | No | No |
+
+---
+
+## Role Enforcement Middleware (Issue #283)
+
+Two new middleware helpers complement the existing auth middleware:
+
+### `requireRole(...roles)`
+
+File: `backend/src/middleware/requireRole.js`
+
+Enforces explicit role requirements **after** `requireAdminAuth` or
+`requireSchoolAuth` has run.  If the authenticated user does not hold any of the
+listed roles, the request is rejected with `403 INSUFFICIENT_ROLE`.
+
+```js
+const { requireRole } = require('../middleware/requireRole');
+
+// Only owner or finance may generate reports
+router.get('/reports', requireSchoolAuth(), requireRole('owner', 'finance'), handler);
+```
+
+**Super-admin bypass**: tokens with `role: 'admin'` or `roles: ['super_admin']`
+always pass.
+
+### `assertTenantScope`
+
+File: `backend/src/middleware/tenantIsolation.js`
+
+Defence-in-depth layer that verifies the school in the URL/body matches the
+token's `schoolId` claim, preventing a correctly-authenticated user from acting
+on a resource belonging to a different school.
+
+```js
+const { assertTenantScope } = require('../middleware/tenantIsolation');
+
+router.get('/students', requireSchoolAuth(), assertTenantScope, handler);
+```
+
+Returns `403 TENANT_ISOLATION_VIOLATION` on a cross-tenant attempt.
+
+---
+
+## Cross-Tenant Isolation
+
+Cross-tenant data access is prevented at three levels:
+
+1. **Token level** (`requireSchoolAuth`): JWT `schoolId` must match the
+   `X-School-ID` header.  Mismatch → `403 TENANT_MISMATCH`.
+2. **Resource level** (`assertTenantScope`): schoolId in URL params / body must
+   match the token claim.  Mismatch → `403 TENANT_ISOLATION_VIOLATION`.
+3. **Query level** (controllers): every database query includes `schoolId`
+   from `req.schoolId` (set from the token, not the request) as an equality
+   filter.  This is enforced by the `tenantScope` Mongoose plugin and
+   documented in the ownership-check column of the matrix above.
+
+All three layers must be satisfied for a request to succeed.
+
+---
+
+## Testing the Authorization Matrix
+
+The `flattenMatrix()` function exported from `authorizationMatrix.js` returns a
+flat list of every endpoint with its auth config.  Use it in test suites to
+enumerate all endpoints and assert that the correct middleware is registered:
+
+```js
+const { flattenMatrix } = require('../src/middleware/authorizationMatrix');
+
+test('all SUPER_ADMIN endpoints are protected', () => {
+  const endpoints = flattenMatrix().filter(e => e.authLevel === 'SUPER_ADMIN');
+  // For each endpoint, verify the route stack in the Express app includes requireAdminAuth
+  for (const ep of endpoints) {
+    // ... assert middleware presence
+  }
+});
+```
+
+The `validateMatrix()` function checks the matrix for structural correctness
+(all required fields present, valid auth levels, valid HTTP methods):
+
+```js
+const { validateMatrix } = require('../src/middleware/authorizationMatrix');
+test('authorization matrix is valid', () => {
+  expect(validateMatrix()).toBe(true);
+});
+```
+
+---
+
+## Updated Error Response Contract
+
+| Scenario | HTTP Status | Code |
+|----------|------------|------|
+| No token provided | `401` | `MISSING_AUTH_TOKEN` |
+| Token expired | `401` | `TOKEN_EXPIRED` |
+| Invalid / malformed token | `401` | `INVALID_AUTH_TOKEN` |
+| IP temporarily blocked | `429` | `IP_BLOCKED` |
+| Insufficient role (`requireRole`) | `403` | `INSUFFICIENT_ROLE` |
+| Token not scoped to a school | `403` | `MISSING_TENANT_CLAIM` |
+| Token schoolId ≠ X-School-ID | `403` | `TENANT_MISMATCH` |
+| Cross-tenant resource access | `403` | `TENANT_ISOLATION_VIOLATION` |
+| MFA setup required | `403` | `MFA_SETUP_REQUIRED` |
