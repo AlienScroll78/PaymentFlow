@@ -279,6 +279,10 @@ jobs:
       - name: Frontend coverage
         run: npm run coverage:frontend
 
+      - name: Risk-aware coverage summary (#348)
+        if: always()
+        run: node scripts/coverage-risk-summary.js || true
+
       - name: Upload backend coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -411,6 +415,64 @@ jobs:
         if: always() && steps.changes.outputs.run == 'true'
         run: docker compose down -v
 
+  # ── #346: Chaos tests — dependency outage scenarios ──────────────────────
+  # Runs the chaos test suite in an isolated environment. The tests exercise
+  # graceful degradation under MongoDB drops, Redis outages, Horizon timeouts,
+  # and queue-worker crashes. In mock mode (no CHAOS_TOXIPROXY_URL) every
+  # scenario runs via in-process fault injection, so no extra sidecar is
+  # required for the standard CI run.
+  chaos:
+    name: Chaos tests — dependency outage scenarios
+    runs-on: ubuntu-latest
+    env:
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      MONGO_URI: mongodb://localhost:27017/stellaredupay_chaos?replicaSet=rs0
+      JWT_SECRET: ci-chaos-jwt-secret-not-used-in-production
+      SCHOOL_WALLET_ADDRESS: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --replSet rs0
+          --health-cmd "mongosh --quiet --eval 'try { if (rs.status().ok !== 1) { throw new Error(\"rs not initiated\"); } } catch (e) { try { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"localhost:27017\" }] }); } catch (e2) {} process.exit(1); } if (!db.hello().isWritablePrimary) { process.exit(1); }'"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
+          --health-start-period 20s
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            backend/node_modules
+            frontend/node_modules
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - run: npm ci
+      - run: cd backend && npm ci && cd ..
+
+      - name: Run chaos tests
+        run: npx jest --testPathPattern=tests/chaos/ --forceExit --runInBand
+
+      - name: Upload chaos test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-test-results
+          path: |
+            coverage/chaos
+          retention-days: 14
+
   # ── #1389: Required gate ─────────────────────────────────────────────────
   # A single job that every branch-protection rule needs to require. Add this
   # job name ("CI gate") as the sole required status check in GitHub's branch
@@ -435,5 +497,6 @@ jobs:
       - build-frontend
       - test
       - coverage
+      - chaos
     steps:
       - run: echo "All required checks passed."
