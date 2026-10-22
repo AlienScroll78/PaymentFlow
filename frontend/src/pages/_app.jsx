@@ -40,6 +40,23 @@ const APP_LAYOUT_ROUTES = [
   "/reports",
 ];
 
+const ROUTE_SECTION_NAMES = {
+  "/dashboard": "Student and payment dashboard",
+  "/pay-fees": "Payments",
+  "/reports": "Reports",
+  "/analytics": "Analytics",
+  "/audit-logs": "Audit log",
+  "/fees": "Fees",
+  "/fee-adjustments": "Fee adjustments",
+  "/disputes": "Disputes",
+  "/refunds": "Refunds",
+  "/webhooks": "Webhooks",
+  "/source-validation-rules": "Payment validation rules",
+  "/security-headers": "Security settings",
+  "/login": "Sign in",
+  "/mfa-setup": "Multi-factor authentication",
+};
+
 export default function MyApp({ Component, pageProps }) {
   const router = useRouter();
   const { pathname } = router;
@@ -63,9 +80,11 @@ export default function MyApp({ Component, pageProps }) {
   }, [dark]);
 
   const useAppLayout = APP_LAYOUT_ROUTES.includes(pathname);
+  const sectionName = ROUTE_SECTION_NAMES[pathname] || "Application";
 
   return (
-    <AdminAuthProvider>
+    <ErrorBoundary sectionName="Application">
+      <AdminAuthProvider>
       <ThemeContext.Provider value={{ dark, toggle: () => setDark((d) => !d) }}>
         <Head>
           <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -73,22 +92,19 @@ export default function MyApp({ Component, pageProps }) {
         <Navbar />
 
         {/* App-level boundary: last-resort catch for anything the route boundary misses */}
-        <ErrorBoundary>
-          {/* Route-level boundary: keyed on pathname so it resets on every navigation.
-              This ensures a render error on one route doesn't persist after the user
-              navigates to a different route. — Issue #9 */}
-          <ErrorBoundary key={pathname}>
-            {useAppLayout ? (
-              <AppLayout>
-                <Component {...pageProps} />
-              </AppLayout>
-            ) : (
+        {/* Route boundary resets on navigation and labels recovery with the affected section. */}
+        <ErrorBoundary key={pathname} sectionName={sectionName}>
+          {useAppLayout ? (
+            <AppLayout>
               <Component {...pageProps} />
-            )}
-          </ErrorBoundary>
+            </AppLayout>
+          ) : (
+            <Component {...pageProps} />
+          )}
         </ErrorBoundary>
       </ThemeContext.Provider>
-    </AdminAuthProvider>
+      </AdminAuthProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -794,6 +794,7 @@ const en = {
 
   errorBoundary: {
     title: "Something went wrong",
+    sectionTitle: "Something went wrong in {{section}}",
     body: "An unexpected error occurred. You can try reloading the page or go back to safety.",
     reload: "Reload page",
     goBack: "Go back",

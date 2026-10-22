@@ -14,6 +14,7 @@ import FilterChips from "../components/FilterChips"; // Issue #107
 import Pagination from "../components/Pagination";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { useRouteChangeAbort } from "../hooks/useRouteChangeAbort";
+import useGridCellNavigation from "../hooks/useGridCellNavigation";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
@@ -23,9 +24,11 @@ import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOpt
 import { formatRelative } from "../utils/dateTime";
 
 const DEFAULT_PAGE_SIZE = 20;
+const OPTIMISTIC_STUDENT_FIELDS = ["name", "class", "parentEmail", "parentPhone", "reminderOptOut"];
 
 function Dashboard() {
   const { t } = useTranslation();
+  const studentGridProps = useGridCellNavigation();
   const timeAgo = (iso) => formatRelative(iso, t);
 
   const STATUS_BADGE = {
@@ -53,6 +56,7 @@ function Dashboard() {
   const [error, setError]                     = useState(null);
   const [editingStudent, setEditingStudent]   = useState(null);
   const [editingStudentData, setEditingStudentData] = useState(null);
+  const [mutationToast, setMutationToast] = useState("");
 
   // Table density (compact / default / comfortable) — Issue #113
   const { density, setDensity } = useTableDensity();
@@ -79,6 +83,7 @@ function Dashboard() {
   // Holds the AbortController for the most-recent fetchStudents call so
   // superseded (stale) requests can be cancelled before the next one starts.
   const studentsAbortRef = useRef(null);
+  const optimisticStudentRef = useRef(null);
 
   useEffect(() => {
     clearTimeout(searchDebounceRef.current);
@@ -192,8 +197,42 @@ function Dashboard() {
   }
 
   function handleSaveStudent() {
+    optimisticStudentRef.current = null;
     handleCloseForm();
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
+  }
+
+  function handleOptimisticStudentUpdate(studentId, updates) {
+    const current = students.find((student) => student.studentId === studentId);
+    if (!current) return;
+    const safeUpdates = Object.fromEntries(
+      OPTIMISTIC_STUDENT_FIELDS
+        .filter((field) => Object.prototype.hasOwnProperty.call(updates, field))
+        .map((field) => [field, updates[field]])
+    );
+    optimisticStudentRef.current = {
+      studentId,
+      previous: Object.fromEntries(
+        OPTIMISTIC_STUDENT_FIELDS.map((field) => [field, current[field]])
+      ),
+    };
+    setStudents((previous) => previous.map((student) => (
+      student.studentId === studentId ? { ...student, ...safeUpdates } : student
+    )));
+  }
+
+  function handleOptimisticStudentRollback(reason) {
+    const snapshot = optimisticStudentRef.current;
+    optimisticStudentRef.current = null;
+    if (snapshot) {
+      setStudents((previous) => previous.map((student) => (
+        student.studentId === snapshot.studentId
+          ? { ...student, ...snapshot.previous }
+          : student
+      )));
+    }
+    setMutationToast(`Student update failed. Previous values restored. ${reason}`);
+    setTimeout(() => setMutationToast(""), 5000);
   }
 
   // Toggle expanded detail row for a student — Issue #113
@@ -361,6 +400,11 @@ function Dashboard() {
       {(summaryError || studentsError) && (
         <div aria-live="assertive" aria-atomic="true" className="sr-only">
           {summaryError || studentsError}
+        </div>
+      )}
+      {mutationToast && (
+        <div role="alert" aria-live="assertive" className="alert alert-danger" style={{ position: "fixed", right: "1rem", bottom: "1rem", zIndex: 1100, maxWidth: "min(32rem, calc(100vw - 2rem))" }}>
+          {mutationToast}
         </div>
       )}
 
@@ -541,18 +585,22 @@ function Dashboard() {
             ) : (
               <div style={{ overflowX: "auto" }} aria-busy={studentsLoading} aria-label={t("dashboard.studentTableAria")}>
                 <table
+                  {...studentGridProps}
+                  role="grid"
+                  aria-colcount={6}
+                  aria-rowcount={students.length + 1}
                   className="data-table"
                   data-density={density}
                   aria-label={studentsLoading ? t("dashboard.studentsLoadingAria") : t("dashboard.studentTableAria")}
                 >
                   <thead>
-                    <tr>
-                      <th scope="col">{t("dashboard.colStudentId")}</th>
-                      <th scope="col">{t("dashboard.colName")}</th>
-                      <th scope="col" className="col-hide-sm">{t("dashboard.colClass")}</th>
-                      <th scope="col" className="col-hide-sm">{t("dashboard.colFee")}</th>
-                      <th scope="col" className="col-hide-xs">{t("dashboard.colStatus")}</th>
-                      <th scope="col"></th>
+                    <tr role="row">
+                      <th role="columnheader" data-grid-cell scope="col">{t("dashboard.colStudentId")}</th>
+                      <th role="columnheader" data-grid-cell scope="col">{t("dashboard.colName")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-sm">{t("dashboard.colClass")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-sm">{t("dashboard.colFee")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-xs">{t("dashboard.colStatus")}</th>
+                      <th role="columnheader" data-grid-cell scope="col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -579,24 +627,23 @@ function Dashboard() {
                         <>
                           <tr
                             key={s.studentId}
+                            role="row"
                             className={`row-clickable${isExpanded ? " row-expanded" : ""}`}
                             onClick={() => handleRowClick(s.studentId)}
                             aria-expanded={isExpanded}
                             aria-label={isExpanded ? t("dashboard.collapseRow") : t("dashboard.expandRow")}
-                            tabIndex={0}
-                            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleRowClick(s.studentId); } }}
                           >
-                            <td className="col-mono">{s.studentId}</td>
-                            <td className="student-row-name">{s.name}</td>
-                            <td className="student-row-class col-hide-sm">{s.class}</td>
-                            <td className="student-row-fee col-hide-sm">
+                            <td role="gridcell" data-grid-cell className="col-mono">{s.studentId}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-name">{s.name}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-class col-hide-sm">{s.class}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-fee col-hide-sm">
                               <span style={{ fontVariantNumeric: "tabular-nums" }}>{s.feeAmount}</span>
                               <span style={{ marginLeft: "0.25rem", fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600 }}>XLM</span>
                             </td>
-                            <td className="col-hide-xs">
+                            <td role="gridcell" data-grid-cell className="col-hide-xs">
                               <span className={badge.cls}>{badge.label}</span>
                             </td>
-                            <td>
+                            <td role="gridcell" data-grid-cell>
                               <button
                                 onClick={e => { e.stopPropagation(); handleEditStudent(s); }}
                                 className="btn btn-sm btn-ghost"
@@ -606,8 +653,8 @@ function Dashboard() {
                             </td>
                           </tr>
                           {isExpanded && (
-                            <tr key={`${s.studentId}-detail`} className="row-detail">
-                              <td colSpan="6">
+                            <tr key={`${s.studentId}-detail`} role="row" className="row-detail">
+                              <td role="gridcell" data-grid-cell colSpan="6">
                                 <div className="row-detail-grid" aria-label={t("dashboard.expandedDetails")}>
                                   <div className="row-detail-item">
                                     <span className="row-detail-label">{t("dashboard.colStudentId")}</span>
@@ -677,6 +724,8 @@ function Dashboard() {
           student={editingStudentData}
           onClose={handleCloseForm}
           onSave={handleSaveStudent}
+          onOptimisticUpdate={handleOptimisticStudentUpdate}
+          onRollback={handleOptimisticStudentRollback}
         />
       )}
     </>
