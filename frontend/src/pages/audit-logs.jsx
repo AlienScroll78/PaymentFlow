@@ -8,6 +8,7 @@ import {
 import EmptyState from "../components/EmptyState";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 import { useAuditFilters } from "../hooks/useAuditFilters";
@@ -303,86 +304,62 @@ function AuditLogsContent() {
           {(() => {
             const hasActiveFilters = Object.values(filters).some(Boolean);
 
-            if (error) {
-              return (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="data-table" aria-label={t("auditLogs.title")}>
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("auditLogs.colTimestamp")}</th>
-                        <th scope="col">{t("auditLogs.colAction")}</th>
-                        <th scope="col">{t("auditLogs.colPerformedBy")}</th>
-                        <th scope="col">{t("auditLogs.colTarget")}</th>
-                        <th scope="col">{t("auditLogs.colResult")}</th>
-                        <th scope="col">{t("auditLogs.colDetails")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <EmptyState
-                        variant="error"
-                        colSpan={6}
-                        title={t("auditLogs.failedToLoad")}
-                        description="Check your connection and try again."
-                        action={{ label: t("actions.retry"), onClick: () => fetchLogs(null) }}
-                      />
-                    </tbody>
-                  </table>
-                </div>
-              );
-            }
-
-            if (loading) {
-              return (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="data-table" aria-busy="true" aria-label={t("auditLogs.title")}>
-                    <thead>
-                      <tr>
-                        <th>{t("auditLogs.colTimestamp")}</th><th>{t("auditLogs.colAction")}</th><th>{t("auditLogs.colPerformedBy")}</th>
-                        <th>{t("auditLogs.colTarget")}</th><th>{t("auditLogs.colResult")}</th><th>{t("auditLogs.colDetails")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <EmptyState variant="loading" colSpan={6} />
-                    </tbody>
-                  </table>
-                </div>
-              );
-            }
-
-            if (logs.length === 0) {
-              return (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="data-table" aria-label={t("auditLogs.title")}>
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("auditLogs.colTimestamp")}</th>
-                        <th scope="col">{t("auditLogs.colAction")}</th>
-                        <th scope="col">{t("auditLogs.colPerformedBy")}</th>
-                        <th scope="col">{t("auditLogs.colTarget")}</th>
-                        <th scope="col">{t("auditLogs.colResult")}</th>
-                        <th scope="col">{t("auditLogs.colDetails")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <EmptyState
-                        variant={hasActiveFilters ? "filtered" : "empty"}
-                        colSpan={6}
-                        title={hasActiveFilters ? t("auditLogs.noLogsFound") : "No audit logs yet"}
-                        description={hasActiveFilters ? t("auditLogs.emptyFilters") : "Audit events will appear here once activity is recorded."}
-                        action={hasActiveFilters ? {
-                          label: "Clear filters",
-                          onClick: () => {
-                            clearAll();
-                          }
-                        } : undefined}
-                      />
-                    </tbody>
-                  </table>
-                </div>
-              );
-            }
-
-            return (
+          {/* Table */}
+          {loading ? (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("auditLogs.colTimestamp")}</th><th>{t("auditLogs.colAction")}</th><th>{t("auditLogs.colPerformedBy")}</th>
+                    <th>{t("auditLogs.colTarget")}</th><th>{t("auditLogs.colResult")}</th><th>{t("auditLogs.colDetails")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>
+                      {[100,140,80,120,60,40].map((w, j) => (
+                        <td key={j}><div className="skeleton" style={{ height: 12, width: w }} /></td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : logs.length === 0 ? (
+            <EmptyState
+              variant={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? "filtered"
+                  : "empty"
+              }
+              title={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? t("auditLogs.emptyFilteredTitle")
+                  : t("auditLogs.noLogsFound")
+              }
+              description={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? t("auditLogs.emptyFilteredDesc")
+                  : t("auditLogs.emptyFilters")
+              }
+              action={
+                actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate
+                  ? {
+                      label: t("auditLogs.clearFilters"),
+                      onClick: () => {
+                        setActionFilter("");
+                        setTargetTypeFilter("");
+                        setResultFilter("");
+                        setActorIdInput("");
+                        setSearchInput("");
+                        setStartDate("");
+                        setEndDate("");
+                      },
+                    }
+                  : undefined
+              }
+            />
+          ) : (
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">
                 <thead>

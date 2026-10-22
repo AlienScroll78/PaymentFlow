@@ -11,6 +11,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 import { IconAlertTriangle, IconCheck, IconDollarSign, IconChevronLeft, IconChevronRight } from "../components/Icons";
 import PageHero from "../components/PageHero";
+import EmptyState from "../components/EmptyState";
 import AccessiblePagination from "../components/AccessiblePagination";
 import ConfirmDialog from "../components/ConfirmDialog"; // Issue #108
 import { SkeletonTable } from "../components/Skeleton";
@@ -336,9 +337,11 @@ export default function FeesPage() {
             <div className="card-body"><SkeletonTable columns={[90, 90, 100, "100%", 36]} rows={5} /></div>
           ) : fees.length === 0 ? (
             <div className="card-body">
-              <p style={{ color: "var(--text-muted)" }}>
-                {t("fees.empty")}
-              </p>
+              <EmptyState
+                variant="onboarding"
+                title={t("fees.empty")}
+                description={t("fees.emptyDesc")}
+              />
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>

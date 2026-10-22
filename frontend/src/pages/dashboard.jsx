@@ -6,6 +6,7 @@ import StudentForm from "../components/StudentForm";
 import PageHero, { StatCard } from "../components/PageHero";
 import SseDegradedBanner from "../components/SseDegradedBanner";
 import RequireAdmin from "../components/RequireAdmin";
+import EmptyState from "../components/EmptyState";
 import EmptyState, { StandaloneEmptyState } from "../components/EmptyState";
 import BlockchainStatusBadge from "../components/BlockchainStatusBadge";
 import { TableDensityControl, useTableDensity } from "../components/TableDensityControl";
@@ -615,16 +616,39 @@ function Dashboard() {
                         <SkeletonTableRow key={i} index={i} />
                       ))
                     ) : students.length === 0 ? (
-                      <EmptyState
-                        variant={search || statusFilter !== "all" || classFilter ? "filtered" : "empty"}
-                        colSpan={6}
-                        title={search || statusFilter !== "all" || classFilter ? t("dashboard.emptyTitle") : "No students yet"}
-                        description={search || statusFilter !== "all" || classFilter ? t("dashboard.emptyFilters") : t("dashboard.emptyNone")}
-                        action={search || statusFilter !== "all" || classFilter ? {
-                          label: "Clear filters",
-                          onClick: () => { setSearch(""); setStatusFilter("all"); setClassFilter(""); }
-                        } : undefined}
-                      />
+                      <tr>
+                        <td colSpan="6" style={{ padding: 0 }}>
+                          {(search || statusFilter !== "all" || classFilter) ? (
+                            <EmptyState
+                              variant="filtered"
+                              title={t("dashboard.emptyFiltersTitle")}
+                              description={t("dashboard.emptyFilters")}
+                              action={{
+                                label: t("dashboard.clearFilters"),
+                                onClick: () => {
+                                  setSearch("");
+                                  setStatusFilter("all");
+                                  setClassFilter("");
+                                },
+                              }}
+                            />
+                          ) : (
+                            <EmptyState
+                              variant="onboarding"
+                              title={t("dashboard.emptyTitle")}
+                              description={t("dashboard.emptyNone")}
+                              action={{
+                                label: t("dashboard.addFirstStudent"),
+                                onClick: () => {},
+                              }}
+                              secondaryAction={{
+                                label: t("dashboard.gettingStarted"),
+                                href: "/fees",
+                              }}
+                            />
+                          )}
+                        </td>
+                      </tr>
                     ) : students.map(s => {
                       const st = (s.status || "unpaid").toLowerCase();
                       const badge = STATUS_BADGE[st] || STATUS_BADGE.unpaid;
