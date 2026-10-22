@@ -1,5 +1,9 @@
 # Payment Lifecycle State Machine
 
+> **Related documents**: [Webhook Integration Guide](webhooks.md) · [Idempotency](idempotency-payment-verification.md) · [Authorization Matrix](authorization-matrix.md)
+>
+> **OpenAPI reference**: `GET /api/docs.json` — all payment endpoints include `status` in their response schemas.
+
 This document is the integration contract for payment lifecycle states. PaymentFlow exposes two related state machines on a payment record:
 
 1. `status` is the business and administrative status returned by payment APIs.
@@ -154,3 +158,185 @@ Retrying a job is not the same as changing `FAILED` to `SUCCESS`. Only an authen
 - Stuck-payment reconciliation: [`backend/src/services/stuckPaymentReconciliation.js`](../backend/src/services/stuckPaymentReconciliation.js)
 - Confirmation state tests: [`backend/tests/paymentConfirmationStateMachine.test.js`](../backend/tests/paymentConfirmationStateMachine.test.js)
 - Business transition tests: [`tests/paymentModelTransition.test.js`](../tests/paymentModelTransition.test.js), [`tests/updatePaymentStatus.test.js`](../tests/updatePaymentStatus.test.js), and [`backend/tests/issue1029-failedStatusRecovery.test.js`](../backend/tests/issue1029-failedStatusRecovery.test.js)
+
+---
+
+## State Descriptions
+
+### Business Status States (`payment.status`)
+
+#### `PENDING`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment record exists but processing has not started |
+| **Typical duration** | Milliseconds to minutes (until polling/sync picks up the transaction) |
+| **Possible next states** | `SUBMITTED`, `FAILED` |
+| **Entry events** | New payment record created; payment intent matched to an on-chain transaction |
+| **Side effects** | None; no webhook fired until a transition out of PENDING |
+
+#### `SUBMITTED`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | An XDR submission or processing attempt has started |
+| **Typical duration** | Seconds to minutes (Stellar confirms within 3–5 seconds on average) |
+| **Possible next states** | `SUCCESS`, `FAILED` |
+| **Entry events** | `submitTransaction` called for the payment's XDR |
+| **Side effects** | `payment.pending` webhook fired to registered endpoints |
+
+#### `SUCCESS`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment confirmed and credited to the student's balance |
+| **Typical duration** | Terminal for most payments; may transition via admin action |
+| **Possible next states** | `DISPUTED`, `REFUNDED` |
+| **Entry events** | Successful XDR submission; Stellar sync verification; manual admin correction from `FAILED` |
+| **Side effects** | Student balance updated; `payment.confirmed` webhook fired; receipt generated; SSE event emitted; audit log entry written |
+
+#### `FAILED`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment processing failed — permanent error recorded |
+| **Typical duration** | Terminal unless corrected by an admin |
+| **Possible next states** | `SUCCESS` (admin correction), `DISPUTED` (admin escalation) |
+| **Entry events** | Failed XDR submission; bad destination/asset/memo; admin manual failure; verification exhausted retries |
+| **Side effects** | `payment.failed` webhook fired; retry job moved to dead-letter queue; audit log entry written |
+
+> Transient failures go to the retry queue — the payment status stays `SUBMITTED` or `PENDING` until retries are exhausted or a permanent error is identified.
+
+#### `DISPUTED`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment is under an administrative or parent dispute workflow |
+| **Typical duration** | Hours to days (72-hour SLA default before auto-escalation) |
+| **Possible next states** | `REFUNDED` |
+| **Entry events** | Admin marks payment as disputed; dispute form submitted |
+| **Side effects** | Dispute record created; `payment.suspicious` webhook may fire; audit log entry written; SLA timer starts |
+
+#### `REFUNDED`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment has been refunded to the payer |
+| **Typical duration** | Terminal |
+| **Possible next states** | None (terminal) |
+| **Entry events** | Admin processes refund; dispute resolved via refund |
+| **Side effects** | `payment.refunded` webhook fired; student balance adjusted; refund record created; audit log entry written |
+
+#### `INVALID`
+
+| Property | Value |
+|----------|-------|
+| **Meaning** | Payment is structurally invalid (missing memo, wrong destination, etc.) |
+| **Typical duration** | Terminal |
+| **Possible next states** | None (terminal) |
+| **Entry events** | Missing student memo; invalid Stellar destination; unknown asset |
+| **Side effects** | No balance update; no webhook fired; audit log entry written |
+
+---
+
+## Transition Event & Condition Reference
+
+| From | To | Triggering Event | Conditions | Side Effects |
+|------|----|-----------------|------------|-------------|
+| *(new record)* | `PENDING` | Payment intent created or transaction detected on-chain | Valid transaction hash; school wallet match | None |
+| `PENDING` | `SUBMITTED` | XDR submission initiated | Valid XDR available | `payment.pending` webhook |
+| `PENDING` | `FAILED` | Admin manually fails stuck payment | Admin auth + audit reason | `payment.failed` webhook; DLQ entry |
+| `SUBMITTED` | `SUCCESS` | Submission succeeds on Stellar network | Transaction confirmed on-chain within threshold | Balance updated; `payment.confirmed` webhook; receipt created; SSE event |
+| `SUBMITTED` | `FAILED` | Submission permanently fails | Permanent error code (bad auth, bad destination, etc.) | `payment.failed` webhook |
+| `SUCCESS` | `DISPUTED` | Admin opens dispute | Admin auth + dispute reason | Dispute record created; audit log |
+| `SUCCESS` | `REFUNDED` | Admin processes refund | Admin auth + refund reason | Refund record; balance adjusted; `payment.refunded` webhook |
+| `DISPUTED` | `REFUNDED` | Admin resolves dispute via refund | Admin auth + resolution notes | Refund record; `payment.refunded` webhook |
+| `FAILED` | `SUCCESS` | Admin corrects wrongly-failed payment | Admin auth + audit reason + `adminOverride: true` | Balance updated; audit log (correction noted) |
+| `FAILED` | `DISPUTED` | Admin escalates for investigation | Admin auth + audit reason + `adminOverride: true` | Dispute record; audit log |
+
+---
+
+## On-Chain Confirmation State Descriptions
+
+### `detected`
+
+Transaction seen on-chain; ledger depth unknown or depth < 1. Entry state for all new on-chain payments.
+
+### `pending`
+
+Transaction depth ≥ 1. Waiting for the configured `CONFIRMATION_THRESHOLD` (default: 2 ledgers).
+
+### `confirmed`
+
+Transaction depth ≥ `CONFIRMATION_THRESHOLD`. Safe for balance decisions and receipt generation.
+
+### `finalized`
+
+Transaction depth ≥ `FINALIZATION_THRESHOLD` (default: 5× `CONFIRMATION_THRESHOLD`). Practically irreversible. Used for compliance-grade finality.
+
+### `failed` (confirmation)
+
+Suspicious or invalid signal received. Terminal. Cannot re-enter the confirmation state machine. Does not automatically rewrite the business `status` field.
+
+---
+
+## Happy Path (End-to-End)
+
+```
+Parent wallet ──► Stellar network ──► Horizon API
+                                          │
+                                    Background polling
+                                          │
+                                    PENDING (detected)
+                                          │
+                                    SUBMITTED (pending confirmation)
+                                          │ Stellar confirms ~5s
+                                    SUCCESS (confirmed)
+                                          │
+                              ┌───────────┴──────────────┐
+                         Webhook fired              Receipt generated
+                     payment.confirmed             student balance updated
+```
+
+---
+
+## Error & Recovery Paths
+
+```
+PENDING ──► SUBMITTED ──► [transient error] ──► retry queue
+                                                    │
+                                             [max retries]
+                                                    │
+                                                 FAILED ──► admin review
+                                                              │
+                                                    ┌─────────┴──────────┐
+                                              FAILED→SUCCESS        FAILED→DISPUTED
+                                              (correction)          (escalation)
+```
+
+---
+
+## Webhook Events by Transition
+
+| Business Status Transition | Webhook Event |
+|---------------------------|--------------|
+| `PENDING` → `SUBMITTED` | `payment.pending` |
+| `SUBMITTED` → `SUCCESS` | `payment.confirmed` |
+| Any → `FAILED` | `payment.failed` |
+| `SUCCESS` → `DISPUTED` | `payment.suspicious` |
+| Any → `REFUNDED` | `payment.refunded` |
+
+See [`docs/webhooks.md`](webhooks.md) for the full event catalog and payload schema.
+
+---
+
+## Integration Checklist
+
+For integrators building on the webhook API:
+
+- [ ] Subscribe to `payment.confirmed` for balance/enrollment updates.
+- [ ] Subscribe to `payment.failed` for operator alerting.
+- [ ] Handle `payment.suspicious` / `payment.refunded` to reverse any downstream actions.
+- [ ] Treat `REFUNDED` and `INVALID` as terminal — no further transitions are possible.
+- [ ] Do not assume `confirmationStatus: "confirmed"` implies `finalized`; use `confirmationState: "finalized"` for irreversibility decisions.
+- [ ] Use `X-StellarEduPay-Delivery-ID` for idempotency — the same event may be delivered more than once (at-least-once delivery).
