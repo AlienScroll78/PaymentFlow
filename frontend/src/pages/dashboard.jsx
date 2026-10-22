@@ -22,6 +22,7 @@ import {
   IconSearch,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
+import FilterChips from "../components/FilterChips";
 import { formatRelative } from "../utils/dateTime";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -540,37 +541,41 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Filter chips — Issue #107 */}
-          {(() => {
-            const activeFilters = [
-              statusFilter && statusFilter !== "all"
-                ? { key: "status", label: t("dashboard.colStatus"), value: t(`status.student.${statusFilter}`) }
-                : null,
-              classFilter
-                ? { key: "className", label: t("dashboard.colClass"), value: classFilter }
-                : null,
-              debouncedSearch
-                ? { key: "search", label: t("dashboard.searchAria"), value: debouncedSearch }
-                : null,
-            ].filter(Boolean);
-            return activeFilters.length > 0 ? (
-              <div style={{ padding: "0 1.25rem" }}>
-                <FilterChips
-                  filters={activeFilters}
-                  onRemove={key => {
-                    if (key === "status")    setStatusFilter("all");
-                    if (key === "className") setClassFilter("");
-                    if (key === "search")    setSearch("");
-                  }}
-                  onClearAll={() => {
-                    setStatusFilter("all");
-                    setClassFilter("");
-                    setSearch("");
-                  }}
-                />
-              </div>
-            ) : null;
-          })()}
+          {/* Filter chip bar — Issue #355: show active filters as removable chips */}
+          <div style={{ paddingLeft: "1.25rem", paddingRight: "1.25rem" }}>
+            <FilterChips
+              filters={[
+                {
+                  key: "search",
+                  label: t("dashboard.searchLabel"),
+                  value: debouncedSearch,
+                  displayValue: debouncedSearch,
+                },
+                {
+                  key: "status",
+                  label: t("dashboard.statusLabel"),
+                  value: statusFilter === "all" ? "" : statusFilter,
+                  displayValue: statusFilter === "all" ? "" : t(`status.student.${statusFilter}`, { defaultValue: statusFilter }),
+                },
+                {
+                  key: "class",
+                  label: t("dashboard.classLabel"),
+                  value: classFilter,
+                  displayValue: classFilter,
+                },
+              ]}
+              onRemove={(key) => {
+                if (key === "search")  setSearch("");
+                if (key === "status")  setStatusFilter("all");
+                if (key === "class")   setClassFilter("");
+              }}
+              onClearAll={() => {
+                setSearch("");
+                setStatusFilter("all");
+                setClassFilter("");
+              }}
+            />
+          </div>
 
           {/* Table */}
           <ErrorBoundary>
