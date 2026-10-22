@@ -179,18 +179,8 @@ function MfaSetupContent() {
 
   /* Fetch QR + secret from backend */
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    setupUserMfa()
-      .then(res => {
-        setSecret(res.data.secret);
-        setQrCode(res.data.qrCode);
-      })
-      .catch(err => {
-        setError(getErrorMessage(err.response?.data?.code, err.response?.data?.error) || t("mfa.failedToStart"));
-      })
-      .finally(() => setLoading(false));
-  }, [t]);
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   /* Step 2: verify TOTP code */
   async function handleVerify(e) {
@@ -272,8 +262,25 @@ function MfaSetupContent() {
 
       {/* Global error */}
       {error && (
-        <div role="alert" className="alert alert-danger" style={{ marginBottom: "1rem" }}>
-          {error}
+        <div
+          ref={errorRef}
+          role="alert"
+          tabIndex={-1}
+          style={{
+            padding: "0.75rem 1rem",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--danger-bg, #fff1f2)",
+            border: "1px solid var(--danger-border, #fecdd3)",
+            color: "var(--danger-text, #be123c)",
+            fontSize: "0.875rem",
+            fontWeight: 600,
+            marginBottom: "1.25rem",
+            outline: "none",
+          }}
+          aria-live="assertive"
+          aria-atomic="true"
+        >
+          ⚠ Step 3 — Code verification failed: {error}
         </div>
       )}
 
