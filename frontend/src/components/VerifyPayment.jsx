@@ -3,13 +3,13 @@
  * Uses PaymentAlert for structured severity on payment failure messages.
  */
 import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { verifyPayment } from "../services/api";
 import { parseStellarError } from "../utils/stellarErrors";
 import { getErrorMessage } from "../utils/errorMessages";
 import { IconCheck, IconExternalLink, IconShield } from "./Icons";
 import PaymentAlert, { getSeverityForCode } from "./PaymentAlert";
-
 /* Suggested "what to do next" steps keyed by error code */
 const RECOVERY_STEPS = {
   STELLAR_NETWORK_ERROR: [
@@ -20,43 +20,46 @@ const RECOVERY_STEPS = {
   HORIZON_UNREACHABLE: [
     "Check your internet connection.",
     "Wait a few minutes, then retry.",
-  ],
   HORIZON_UNAVAILABLE: [
     "The Stellar network is temporarily down.",
-    "Wait a few minutes, then retry.",
-  ],
   tx_insufficient_fee: [
     "The network is congested — wait a few minutes.",
     "Retry with a higher transaction fee in your wallet.",
-  ],
   op_underfunded: [
     "Add more XLM to your wallet to cover the payment and the transaction fee.",
     "Then retry the payment.",
-  ],
   TX_FAILED: [
     "Review the transaction on Stellar Explorer.",
     "If the failure was temporary, retry verification.",
     "Contact support if the issue persists.",
-  ],
   MISSING_MEMO: [
     "Ask the sender to resend with your Student ID in the memo field.",
     "Your Student ID is required for automatic matching.",
-  ],
   UNDERPAID: [
     "Send the remaining balance to complete the fee.",
     "Use your Student ID as the memo.",
-  ],
   INVALID_DESTINATION: [
     "Ensure the payment was sent to the school's wallet address.",
     "Contact the school if unsure of the correct address.",
-  ],
 };
-
 const CRITICAL_STEPS = [
   "Do not retry — this requires manual intervention.",
   "Note the reference number shown below.",
   "Contact support with the reference number for assistance.",
 ];
+import { IconAlertTriangle, IconCheck, IconExternalLink, IconShield } from "./Icons";
+import { generateIdempotencyKey } from "../utils/idempotencyKey";
+import TimestampDisplay, { DISPLAY_MODE } from "./TimestampDisplay";
+import PaymentFailureBanner from "./PaymentFailureBanner";
+const FEE_VALIDATION_SEVERITY = {
+  valid:     null,
+  overpaid:  "warning",
+  underpaid: "warning",
+  unknown:   "recoverable",
+const FEE_VALIDATION_LABELS = {
+  overpaid:  "Overpayment detected",
+  underpaid: "Underpayment detected",
+  unknown:   "Validation inconclusive",
 
 const STATUS_BADGE = {
   valid:     { cls: "badge badge-success", key: "status.validation.valid" },
@@ -97,15 +100,43 @@ export default function VerifyPayment() {
   const [loading, setLoading]             = useState(false);
   const alertRef = useRef(null);
 
+  // One idempotency key per form session — generated on mount, cleared only
+  // after a confirmed 2xx success. Retries reuse the same key so the backend
+  // deduplicates duplicate verification requests.
+  const idempotencyKeyRef = useRef(null);
+  useEffect(() => {
+    idempotencyKeyRef.current = generateIdempotencyKey();
+    return () => {
+      // Reset the key when the component unmounts so a fresh mount gets a new one.
+      idempotencyKeyRef.current = null;
+    };
+  }, []);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
     setResult(null);
     setLoading(true);
     try {
-      const res = await verifyPayment(txHash.trim());
+      const res = await verifyPayment(txHash.trim(), idempotencyKeyRef.current);
       setResult(res.data);
+      // Confirmed success — clear the key so a subsequent submission (new
+      // transaction hash) gets a fresh key rather than reusing the old one.
+      idempotencyKeyRef.current = generateIdempotencyKey();
     } catch (err) {
+      // 409 Conflict means the backend already processed this idempotency key
+      // (duplicate submission). Treat it as a successful deduplication.
+      if (err.response?.status === 409) {
+        const existingResult = err.response?.data?.data ?? err.response?.data;
+        if (existingResult) {
+          setResult(existingResult);
+          idempotencyKeyRef.current = generateIdempotencyKey();
+          return;
+        }
+        setError(t("verifyPayment.alreadyCreated"));
+        errorRef.current?.focus();
+        return;
+      }
       const stellar = parseStellarError(err);
       if (stellar) {
         const code = err.response?.data?.code || "STELLAR_NETWORK_ERROR";
@@ -227,14 +258,19 @@ export default function VerifyPayment() {
             </InfoRow>
             <InfoRow label={t("verifyPayment.memoLabel")} mono>{result.memo}</InfoRow>
             <InfoRow label={t("verifyPayment.date")}>
-              {result.date ? new Date(result.date).toLocaleString() : "—"}
+              {result.date
+                ? <TimestampDisplay iso={result.date} mode={DISPLAY_MODE.UTC} />
+                : "—"}
             </InfoRow>
-            {result.feeValidation?.message && (
-              <InfoRow label={t("verifyPayment.note")}>
-                <span style={{ color: st === "valid" ? "var(--success-text)" : "var(--warning-text)" }}>
-                  {result.feeValidation.message}
-                </span>
-              </InfoRow>
+            {result.feeValidation?.message && st !== "valid" && (
+              <div style={{ marginTop: "0.875rem" }}>
+                <PaymentFailureBanner
+                  severity={FEE_VALIDATION_SEVERITY[st] || "warning"}
+                  title={FEE_VALIDATION_LABELS[st] || "Validation issue"}
+                  message={result.feeValidation.message}
+                  compact={false}
+                />
+              </div>
             )}
             <div style={{ padding: "0.625rem 0" }}>
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>{t("verifyPayment.txHash")}</div>
