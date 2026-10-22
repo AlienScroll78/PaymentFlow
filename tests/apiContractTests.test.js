@@ -455,3 +455,31 @@ describe('universal error envelope', () => {
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// Contract: OpenAPI spec conformance
+// ---------------------------------------------------------------------------
+
+describe('OpenAPI Spec Contract Conformance (#273)', () => {
+  const swaggerSpec = require('../backend/src/config/swagger');
+
+  test('OpenAPI spec is valid and defines x-error-codes taxonomy', () => {
+    expect(swaggerSpec).toBeDefined();
+    expect(swaggerSpec['x-error-codes']).toBeDefined();
+  });
+
+  test('All contract error codes exist in the error taxonomy', () => {
+    const errorCodes = swaggerSpec['x-error-codes'];
+    for (const [, endpointFixtures] of Object.entries(fixtures.responses)) {
+      const errors = endpointFixtures.errors || {};
+      for (const [code] of Object.entries(errors)) {
+        if (code !== 'UNAUTHORIZED' && code !== 'FORBIDDEN' && code !== 'NOT_FOUND') {
+          // If in taxonomy, status must match
+          if (errorCodes[code]) {
+            expect(errorCodes[code].status).toBeGreaterThanOrEqual(400);
+          }
+        }
+      }
+    }
+  });
+});

@@ -113,6 +113,25 @@ export function SkeletonTableRow({ index = 0 }) {
   );
 }
 
+export function SkeletonTable({ columns, rows = 5, className = "data-table" }) {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" aria-label="Loading...">
+      <table className={className} aria-hidden="true">
+        <thead>
+          <tr>{columns.map((width, index) => <th key={index}><SkeletonBlock width={width} height={12} /></th>)}</tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }).map((_, rowIndex) => (
+            <tr key={rowIndex} aria-hidden="true">
+              {columns.map((width, columnIndex) => <td key={columnIndex}><SkeletonBlock width={width} height={12} /></td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Detail card ─────────────────────────────────────────────────────────────
 
 /**

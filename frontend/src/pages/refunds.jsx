@@ -4,7 +4,10 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck, IconChevronLeft, IconChevronRight } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
+import ConfirmDialog, { CONFIRM_TIER } from "../components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
+import { SkeletonDetailCard } from "../components/Skeleton";
+import { useAbortController } from "../hooks/useAbortController";
 
 const STATUS_META = {
   approval_pending: { cls: "badge-warning",  labelKey: "status.refund.approval_pending", color: "var(--warning)" },
@@ -25,18 +28,19 @@ function StatusBadge({ status }) {
 
 function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
   const { t } = useTranslation();
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [note, setNote] = useState("");
+  const [submitting, setSubmitting]       = useState(false);
+  const [error, setError]                 = useState(null);
+  const [note, setNote]                   = useState("");
+  const [showConfirm, setShowConfirm]     = useState(false);
 
   const canApprove = refund.initiatedBy !== user?.email && refund.status === "approval_pending";
 
-  async function handleApprove(e) {
-    e.preventDefault();
+  async function handleApprove() {
     if (!canApprove) return;
 
     setError(null);
     setSubmitting(true);
+    setShowConfirm(false);
     try {
       await approveRefund(refund._id, { note });
       onApproved();
@@ -67,18 +71,33 @@ function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
   }
 
   return (
-    <form onSubmit={handleApprove} style={{
-      padding: "0.75rem",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius-sm)",
-      background: "var(--bg-subtle)",
-    }}>
+    <>
+      <ConfirmDialog
+        open={showConfirm}
+        tier={CONFIRM_TIER.HIGH}
+        title={t("refunds.approveRefund")}
+        description={t("refunds.approveConfirmDesc", { studentId: refund.studentId, amount: refund.amount })}
+        confirmPhrase="approve refund"
+        confirmLabel={t("refunds.approveRefund")}
+        cancelLabel={t("actions.cancel")}
+        onConfirm={handleApprove}
+        onCancel={() => setShowConfirm(false)}
+        loading={submitting}
+      />
+
+      <form onSubmit={(e) => { e.preventDefault(); setShowConfirm(true); }} style={{
+        padding: "0.75rem",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        background: "var(--bg-subtle)",
+      }}>
       {error && (
         <div style={{
           marginBottom: "0.75rem",
           padding: "0.5rem 0.75rem",
-          background: "var(--danger-subtle)",
-          color: "var(--danger)",
+          background: "var(--danger-bg)",
+          color: "var(--danger-text)",
+          border: "1px solid var(--danger-border)",
           borderRadius: "var(--radius-sm)",
           fontSize: "0.8125rem",
         }}>
@@ -160,6 +179,7 @@ function ApproveRefundForm({ refund, user, onApproved, onCancelled }) {
         </button>
       </div>
     </form>
+    </>
   );
 }
 
@@ -263,6 +283,9 @@ function Refunds() {
   const [statusFilter, setStatusFilter] = useState("approval_pending");
   const [user, setUser] = useState(null);
 
+  // Issue #254 — abort in-flight refund requests when the component unmounts.
+  const { signal } = useAbortController();
+
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -278,15 +301,19 @@ function Refunds() {
       limit: PAGE_SIZE,
       ...(statusFilter && statusFilter !== "all" && { status: statusFilter }),
     };
-    getSchoolRefunds(params)
+    getSchoolRefunds(params, { signal })
       .then(({ data }) => {
         setRefunds(Array.isArray(data.refunds) ? data.refunds : []);
         setPages(data.pages || 1);
         setTotal(data.total || 0);
       })
-      .catch(() => setError(t("refunds.failedToLoad")))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError(t("refunds.failedToLoad"));
+      })
       .finally(() => setLoading(false));
-  }, [page, statusFilter, t]);
+  }, [page, statusFilter, t, signal]);
 
   useEffect(() => {
     fetchRefunds();
@@ -373,8 +400,10 @@ function Refunds() {
       )}
 
       {loading && (
-        <div style={{ textAlign: "center", padding: "2rem", color: "var(--text-muted)" }}>
-          {t("actions.loading")}
+        <div role="status" aria-live="polite" aria-busy="true" aria-label="Loading..." style={{ display: "grid", gap: "1rem" }}>
+          <SkeletonDetailCard rows={3} />
+          <SkeletonDetailCard rows={3} />
+          <SkeletonDetailCard rows={3} />
         </div>
       )}
 

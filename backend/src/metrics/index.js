@@ -117,6 +117,11 @@ new client.Gauge({
         // Dead-lettered jobs land as waiting in the DLQ (no DLQ worker drains them).
         this.set({ queue: 'transaction-dead-letter' }, (m.waiting || 0) + (m.failed || 0));
       }
+
+      const genericDepths = await require('../queue/deadLetterQueue').getDeadLetterDepths();
+      for (const [queueName, depth] of Object.entries(genericDepths)) {
+        this.set({ queue: `${queueName}-dead-letter` }, depth);
+      }
     } catch (_) {
       // Redis may not be configured — scrape still succeeds
     }
@@ -193,6 +198,18 @@ const stuckPaymentsGauge = new client.Gauge({
       // DB may not be ready yet — scrape still succeeds with stale/zero values
     }
   },
+});
+
+const paymentReconciliationMismatchRate = new client.Gauge({
+  name: 'payment_reconciliation_mismatch_rate',
+  help: 'Mismatch rate of the most recent scheduled payment reconciliation run',
+  registers: [registry],
+});
+
+const paymentReconciliationMismatchThreshold = new client.Gauge({
+  name: 'payment_reconciliation_mismatch_threshold',
+  help: 'Configured payment reconciliation mismatch alert threshold',
+  registers: [registry],
 });
 
 // suspicious_payment_flagged{school_id} — counter of payments flagged as
@@ -603,6 +620,8 @@ module.exports = {
   paymentBatchItemsTotal,
   paymentBatchDurationSeconds,
   stuckPaymentsGauge,
+  paymentReconciliationMismatchRate,
+  paymentReconciliationMismatchThreshold,
   paymentFunnelTotal,
   horizonRequestDurationSeconds,
   webhookDeliveryTotal,

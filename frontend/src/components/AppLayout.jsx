@@ -14,6 +14,7 @@ import {
   IconDollarSign,
   IconShield,
   IconTrendingUp,
+  IconAlertTriangle,
 } from "./Icons";
 
 const PUBLIC_NAV = [

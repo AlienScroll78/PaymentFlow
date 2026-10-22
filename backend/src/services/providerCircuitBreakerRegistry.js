@@ -208,7 +208,7 @@ function getAllStatuses() {
  * @param {string}          providerName
  * @param {function}        fn           - Async function to protect
  * @param {object}          [opts]
- * @param {string}          [opts.errorCode='CIRCUIT_OPEN'] - code for open-circuit error
+ * @param {string}          [opts.errorCode='ERR_PROVIDER_CIRCUIT_OPEN'] - code for open-circuit error
  * @returns {Promise<*>}
  */
 async function withBreaker(providerName, fn, opts = {}) {
@@ -216,7 +216,7 @@ async function withBreaker(providerName, fn, opts = {}) {
 
   if (!cb.isAvailable()) {
     const err = new Error(`${providerName} circuit breaker is open — failing fast`);
-    err.code  = opts.errorCode || 'CIRCUIT_OPEN';
+    err.code  = opts.errorCode || 'ERR_PROVIDER_CIRCUIT_OPEN';
     err.provider = providerName;
     throw err;
   }
@@ -242,6 +242,32 @@ function _updateFailuresGauge(providerName, cb) {
   } catch (_) {}
 }
 
+/**
+ * Return a structured health summary suitable for the /health endpoint.
+ *
+ * allHealthy is false when any provider circuit breaker is OPEN — callers
+ * should surface this as 'degraded' status on the health endpoint so on-call
+ * engineers know a provider is down without having to check Prometheus.
+ *
+ * @returns {{
+ *   allHealthy: boolean,
+ *   openCount: number,
+ *   halfOpenCount: number,
+ *   providers: Array<{ provider: string, state: string, failures: number, timeUntilRetryMs: number }>
+ * }}
+ */
+function getHealthSummary() {
+  const statuses = getAllStatuses();
+  const openBreakers    = statuses.filter((s) => s.state === CB_STATE.OPEN);
+  const halfOpenBreakers = statuses.filter((s) => s.state === CB_STATE.HALF_OPEN);
+  return {
+    allHealthy:    openBreakers.length === 0,
+    openCount:     openBreakers.length,
+    halfOpenCount: halfOpenBreakers.length,
+    providers:     statuses,
+  };
+}
+
 // ── Initialise all pre-defined providers ─────────────────────────────────────
 for (const name of PROVIDER_NAMES) {
   registerBreaker(name);
@@ -251,6 +277,7 @@ module.exports = {
   getBreaker,
   registerBreaker,
   getAllStatuses,
+  getHealthSummary,
   withBreaker,
   PROVIDER_NAMES,
   // Exported for testing

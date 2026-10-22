@@ -125,8 +125,8 @@ if (MAX_PAYMENT_AMOUNT <= MIN_PAYMENT_AMOUNT) {
 }
 
 // ── Body Size Limit ───────────────────────────────────────────────────────────
-// Global JSON body size limit (default: 10kb). Bulk import uses 1mb regardless.
-const MAX_BODY_SIZE = process.env.MAX_BODY_SIZE || '10kb';
+// Global JSON body size limit. Multipart CSV uploads use their own streaming cap.
+const MAX_BODY_SIZE = '50kb';
 
 // ── Timeouts ──────────────────────────────────────────────────────────────────
 const REQUEST_TIMEOUT_MS = parseInt(

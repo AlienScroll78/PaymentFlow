@@ -6,6 +6,7 @@ const { ReportJob, REPORT_STATUSES } = require('../models/reportJobModel');
 const logger = require('../utils/logger');
 const { randomUUID } = require('crypto');
 const sseService = require('../services/sseService');
+const paymentEvents = require('../events/paymentEvents');
 
 const QUEUE_NAME = 'report-generation';
 const REPORT_JOB_TTL_MS = parseInt(process.env.REPORT_JOB_TTL_MS || String(6 * 60 * 60 * 1000), 10);
@@ -26,7 +27,7 @@ function createQueue() {
         attempts: 2,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: { age: 3600, count: 100 },
-        removeOnFail: false,
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 10000 },
       },
     });
     return reportQueue;
@@ -75,21 +76,30 @@ async function enqueueReportJob(jobData) {
       endDate: jobData.endDate || null,
       timezone: jobData.timezone || 'UTC',
       schemaVersion: jobData.schemaVersion || null,
+      format: jobData.format || 'json',
     },
     expiresAt,
   });
 
-  const job = await reportQueue.add(
-    'generate-report',
-    { jobId, ...jobData },
-    { jobId }
-  );
+  try {
+    await reportQueue.add(
+      'generate-report',
+      { jobId, ...jobData },
+      { jobId }
+    );
+  } catch (error) {
+    await ReportJob.findOneAndUpdate(
+      { jobId, status: REPORT_STATUSES.PENDING },
+      { status: REPORT_STATUSES.FAILED, completedAt: new Date(), 'result.error': error.message },
+    );
+    throw error;
+  }
 
   logger.info('[ReportQueue] Report job enqueued', { jobId, type: jobData.type, schoolId: jobData.schoolId });
   return { jobId, reportJob };
 }
 
-async function getReportJob(jobId) {
+function getReportJob(jobId) {
   return ReportJob.findOne({ jobId }).lean();
 }
 
@@ -106,7 +116,8 @@ async function getJobStatus(jobId) {
     createdAt: reportJob.createdAt,
     startedAt: reportJob.startedAt,
     completedAt: reportJob.completedAt,
-    downloadUrl: reportJob.status === REPORT_STATUSES.COMPLETED ? reportJob.downloadUrl : null,
+    downloadUrl: reportJob.status === REPORT_STATUSES.READY ? `/api/reports/${reportJob.jobId}/download` : null,
+    downloadExpiresAt: reportJob.downloadExpiresAt,
   };
 }
 
@@ -117,24 +128,55 @@ async function setJobProcessing(jobId) {
   );
 }
 
-async function setJobCompleted(jobId, result) {
+async function setJobCompleted(jobId, { artifactKey, schemaVersion = null }) {
+  const completedAt = new Date();
   const updated = await ReportJob.findOneAndUpdate(
     { jobId, status: REPORT_STATUSES.PROCESSING },
-    { status: REPORT_STATUSES.COMPLETED, completedAt: new Date(), result },
+    {
+      status: REPORT_STATUSES.READY,
+      completedAt,
+      downloadExpiresAt: new Date(completedAt.getTime() + 15 * 60 * 1000),
+      artifactKey,
+      'result.schemaVersion': schemaVersion,
+    },
     { new: true }
   ).lean();
 
   // Notify SSE clients so they receive push completion rather than polling.
   if (updated) {
     try {
+      const { createReportDownloadUrl } = require('../services/reportArtifactStorage');
+      const remainingSeconds = Math.max(1, Math.floor((updated.downloadExpiresAt.getTime() - Date.now()) / 1000));
+      const downloadUrl = await createReportDownloadUrl(updated.artifactKey, Math.min(15 * 60, remainingSeconds));
       sseService.emit(updated.schoolId, 'report:completed', {
         jobId: updated.jobId,
         type: updated.type,
+        downloadUrl,
+        expiresAt: updated.downloadExpiresAt,
+      });
+      const { fireWebhookToEndpoints } = require('../services/webhookService');
+      await fireWebhookToEndpoints(updated.schoolId, 'report.ready', {
+        jobId: updated.jobId,
+        type: updated.type,
+        downloadUrl,
+        expiresAt: updated.downloadExpiresAt,
+      });
+    } catch (err) {
+      // Notifications are best-effort; do not fail the job after the artifact is ready.
+      logger.warn('[ReportQueue] Completion notification failed', { jobId, error: err.message });
+    }
+
+    // Issue #362 — emit report.ready on the event bus so the notification
+    // subscriber creates an in-app notification for the school.
+    try {
+      paymentEvents.emit('report.ready', {
+        schoolId: updated.schoolId,
+        jobId: updated.jobId,
+        reportType: updated.type,
         downloadUrl: `/api/reports/jobs/${updated.jobId}/download`,
       });
     } catch (err) {
-      // SSE delivery is best-effort; do not fail the job on SSE errors.
-      logger.warn('[ReportQueue] SSE emit failed after job completion', { jobId, error: err.message });
+      logger.warn('[ReportQueue] report.ready event emit failed', { jobId, error: err.message });
     }
   }
 }
@@ -169,6 +211,8 @@ function startReportWorker(processor) {
       jobId: job?.id,
       error: err.message,
     });
+    require('./deadLetterQueue').moveExhaustedJob(QUEUE_NAME, job, err)
+      .catch((dlqError) => logger.error('[ReportQueue] Failed to move exhausted job to DLQ', { jobId: job?.id, error: dlqError.message }));
   });
 
   logger.info('[ReportQueue] Worker started', {

@@ -67,6 +67,7 @@ let transactionRetryQueue = null;
 let deadLetterQueue = null;
 let queueEvents = null;
 let retryWorker = null;
+let dlqPruneTimer = null;
 
 // Job state tracking for monitoring
 const jobMetrics = {
@@ -125,7 +126,7 @@ function createTransactionRetryQueue() {
           age: 3600, // Keep completed jobs for 1 hour
           count: 1000, // Keep last 1000 completed jobs
         },
-        removeOnFail: false, // Keep failed jobs for analysis
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 10000 },
         jobId: null, // Auto-generate job IDs
       },
     });
@@ -147,14 +148,46 @@ function createDeadLetterQueue() {
       defaultJobOptions: {
         attempts: 1, // No retries for dead-lettered jobs
         removeOnComplete: {
-          age: config.dlq.maxAge, // Keep for configured period
+          age: Math.floor(config.dlq.maxAge / 1000),
           count: 10000, // Keep last 10000 dead-lettered jobs
         },
-        removeOnFail: false, // Never remove failed dead-letter jobs
+        removeOnFail: { age: Math.floor(config.dlq.maxAge / 1000), count: 10000 },
       },
     });
   }
   return deadLetterQueue;
+}
+
+async function pruneDeadLetterJobs() {
+  const dlq = createDeadLetterQueue();
+  if (!dlq) return 0;
+  const cutoff = Date.now() - config.dlq.maxAge;
+  let removed = 0;
+  let start = 0;
+  const batchSize = 500;
+  while (true) {
+    const jobs = await dlq.getJobs(['waiting', 'delayed', 'failed', 'paused'], start, start + batchSize - 1);
+    if (!jobs.length) break;
+    const expired = jobs.filter((job) => (Date.parse(job.data.failedAt || '') || job.timestamp) < cutoff);
+    if (expired.length) {
+      await Promise.all(expired.map((job) => job.remove()));
+      removed += expired.length;
+      continue;
+    }
+    if (jobs.length < batchSize) break;
+    start += jobs.length;
+  }
+  return removed;
+}
+
+function startDeadLetterPruner() {
+  if (dlqPruneTimer) return;
+  const run = () => pruneDeadLetterJobs()
+    .then((removed) => { if (removed) logger.info('Pruned expired dead-letter jobs', { removed }); })
+    .catch((error) => logger.error('Failed to prune dead-letter jobs', { error: error.message }));
+  run();
+  dlqPruneTimer = setInterval(run, 60 * 60 * 1000);
+  dlqPruneTimer.unref();
 }
 
 /**
@@ -606,7 +639,8 @@ async function addTransactionToRetryQueue(transactionHash, studentId = null, met
       backoff: {
         type: 'custom',
       },
-      delay: config.retry.initialDelay, // Initial delay before first retry
+      delay: metadata.replayedFromDLQ ? 0 : config.retry.initialDelay,
+      ...(metadata.priority ? { priority: metadata.priority } : {}),
     });
     
     logEvent('JOB_ADDED', {
@@ -718,6 +752,10 @@ async function getDLQStats() {
  */
 async function shutdownQueue() {
   console.log('[TransactionRetryQueue] Shutting down...');
+  if (dlqPruneTimer) {
+    clearInterval(dlqPruneTimer);
+    dlqPruneTimer = null;
+  }
   
   try {
     if (retryWorker) {
@@ -765,6 +803,7 @@ async function initializeQueue() {
     // Create queues
     createTransactionRetryQueue();
     createDeadLetterQueue();
+    startDeadLetterPruner();
     
     // Set up event listeners
     setupEventListeners();
@@ -801,6 +840,7 @@ module.exports = {
   getDeadLetterQueue: () => deadLetterQueue || createDeadLetterQueue(),
   sanitizeJobPayload,
   moveToDeadLetterQueue,
+  pruneDeadLetterJobs,
   calculateBackoffDelay,
   shutdownQueue,
   config,

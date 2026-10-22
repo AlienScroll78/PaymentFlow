@@ -1,3 +1,4 @@
+  cursor: Joi.string().min(1).max(2048).optional(),
 'use strict';
 
 /**
@@ -57,7 +58,7 @@ const auditQuerySchema = Joi.object({
     .messages({ 'string.isoDate': '"startDate" must be a valid ISO 8601 date' }),
   endDate:     Joi.string().isoDate().optional()
     .messages({ 'string.isoDate': '"endDate" must be a valid ISO 8601 date' }),
-  cursor:      Joi.string().max(2048).optional()
+  cursor:      Joi.string().min(1).max(2048).optional()
     .messages({ 'string.max': '"cursor" must not exceed 2048 characters' }),
   page:        Joi.number().integer().min(1).max(10000).default(1),
   limit:       Joi.number().integer().min(1).max(200).default(50),
@@ -91,6 +92,15 @@ const updateStudentSchema = Joi.object({
     .messages({ 'string.max': '"contactNumber" must not exceed 30 characters' }),
 }).unknown(false)
   .messages({ 'object.unknown': '"{{#label}}" is not an allowed field' });
+
+const registerStudentSchema = Joi.object({
+  studentId:    Joi.string().trim().max(28).optional(),
+  name:         Joi.string().trim().min(1).max(200).required(),
+  class:        Joi.string().trim().min(1).max(100).required(),
+  feeAmount:    Joi.number().positive().optional(),
+  parentEmail:  Joi.string().email().max(254).optional().allow('', null),
+  parentPhone:  Joi.string().max(30).optional().allow('', null),
+}).unknown(false);
 
 // ── Dispute body ──────────────────────────────────────────────────────────────
 
@@ -200,6 +210,7 @@ module.exports = {
   paginationSchema,
   exportPaginationSchema,
   auditQuerySchema,
+  registerStudentSchema,
   updateStudentSchema,
   createDisputeSchema,
   createFeeAdjustmentSchema,

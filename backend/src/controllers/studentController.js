@@ -7,6 +7,7 @@ const csv = require('csv-parser');
 const { Readable } = require('stream');
 const { logAudit } = require('../services/auditService');
 const { encryptStudentPii, decryptStudentPii, hashParentEmail } = require('../services/studentPiiEncryption');
+const { encodeListCursor, decodeListCursor, cursorCondition } = require('../utils/listCursor');
 
 async function registerStudent(req, res, next) {
   // Declared in the function scope (not inside try) so the 11000 duplicate-key
@@ -151,8 +152,6 @@ async function getAllStudents(req, res, next) {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
-    const skip = (page - 1) * limit;
-
     const filter = { schoolId: req.schoolId };
 
     if (req.query.class) {
@@ -180,13 +179,50 @@ async function getAllStudents(req, res, next) {
       filter.$or = [{ name: re }, { studentId: re }];
     }
 
-    const [students, total] = await Promise.all([
-      Student.find(filter, req.admin ? {} : { walletAddress: 0, contactEmail: 0, parentPhone: 0 }).sort({ createdAt: -1 }).skip(skip).limit(limit),
-      Student.countDocuments(filter),
-    ]);
+    const legacyOffset = req.legacyOffsetPagination && !req.query.cursor;
+    let students;
+    let pagination;
 
-    res.json({ students, total, page, pages: Math.ceil(total / limit) });
+    if (legacyOffset) {
+      const skip = (page - 1) * limit;
+      const [offsetStudents, total] = await Promise.all([
+        Student.find(filter, req.admin ? {} : { walletAddress: 0, contactEmail: 0, parentPhone: 0 })
+          .sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit),
+        Student.countDocuments(filter),
+      ]);
+      students = offsetStudents;
+      pagination = { page, limit, total, pages: Math.ceil(total / limit), hasNext: page < Math.ceil(total / limit), hasPrev: page > 1 };
+    } else {
+      const cursorFilters = {
+        schoolId: req.schoolId,
+        class: req.query.class || null,
+        status: req.query.status || null,
+        search: req.query.search || null,
+      };
+      const cursorPayload = req.query.cursor ? decodeListCursor(req.query.cursor, cursorFilters) : null;
+      const cursorFilter = cursorPayload
+        ? { $and: [filter, cursorCondition(cursorPayload)] }
+        : filter;
+      const results = await Student.find(cursorFilter, req.admin ? {} : { walletAddress: 0, contactEmail: 0, parentPhone: 0 })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit + 1);
+      const hasNextPage = results.length > limit;
+      students = results.slice(0, limit);
+      pagination = {
+        limit,
+        nextCursor: hasNextPage && students.length
+          ? encodeListCursor(students[students.length - 1], cursorFilters)
+          : null,
+        hasPreviousPage: Boolean(cursorPayload),
+        hasNextPage,
+      };
+    }
+
+    res.json({ students, pagination });
   } catch (err) {
+    if (err.code === 'INVALID_CURSOR') {
+      return res.status(400).json({ error: err.message, code: 'INVALID_CURSOR' });
+    }
     next(err);
   }
 }
@@ -215,6 +251,8 @@ async function deleteStudent(req, res, next) {
       return next(err);
     }
 
+    const before = student.toObject();
+
     // Perform soft delete — set deletedAt timestamp instead of removing the document
     await student.softDelete();
 
@@ -234,7 +272,9 @@ async function deleteStudent(req, res, next) {
       performedBy: req.auditContext?.performedBy ?? 'unknown',
       targetId: studentId,
       targetType: 'student',
-      details: { name: student.name, class: student.class, deletedAt: student.deletedAt },
+      details: { before, after: { studentId, deletedAt: student.deletedAt } },
+      before,
+      after: { studentId, deletedAt: student.deletedAt },
       result: 'success',
       ipAddress: req.auditContext?.ipAddress ?? null,
       userAgent: req.auditContext?.userAgent ?? null,
@@ -274,6 +314,7 @@ async function restoreStudent(req, res, next) {
       return next(err);
     }
 
+    const before = student.toObject();
     const previousDeletedAt = student.deletedAt;
 
     // Restore the student — clears deletedAt via the softDelete utility
@@ -294,7 +335,9 @@ async function restoreStudent(req, res, next) {
       performedBy: req.auditContext?.performedBy ?? 'unknown',
       targetId: studentId,
       targetType: 'student',
-      details: { name: student.name, class: student.class, previousDeletedAt },
+      details: { before, after: { studentId, deletedAt: null } },
+      before,
+      after: { studentId, deletedAt: null },
       result: 'success',
       ipAddress: req.auditContext?.ipAddress ?? null,
       userAgent: req.auditContext?.userAgent ?? null,

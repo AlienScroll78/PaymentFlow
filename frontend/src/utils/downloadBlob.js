@@ -90,3 +90,14 @@ export function downloadBlob(blob, filename) {
     URL.revokeObjectURL(blobUrl);
   }
 }
+
+/** Start a browser-managed download without buffering the file in JavaScript. */
+export function downloadFile(url, filename) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
