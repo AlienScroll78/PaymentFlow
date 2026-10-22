@@ -93,6 +93,23 @@ HTTP 413
 
 The global limit can be tuned via the `MAX_BODY_SIZE` environment variable (e.g. `MAX_BODY_SIZE=50kb`). The bulk import override is fixed at `1mb` regardless of `MAX_BODY_SIZE`.
 
+## Cursor Pagination
+
+`GET /api/payments`, `GET /api/students`, and `GET /api/audit-logs` use cursor pagination by default. The opaque `nextCursor` is bound to the active filters and expires after one hour. Pass it back as `cursor` to retrieve the next page. Cursor responses include `hasPreviousPage` and `hasNextPage`, and do not expose total row counts.
+
+```json
+{
+  "pagination": {
+    "limit": 50,
+    "nextCursor": "eyJkYXRhIjoiLi4uIiwic2lnbmF0dXJlIjoiLi4uIn0",
+    "hasPreviousPage": false,
+    "hasNextPage": true
+  }
+}
+```
+
+Malformed, expired, or filter-mismatched cursors return HTTP 400 with code `INVALID_CURSOR`. During the deprecation period, explicitly supplying `page` selects the legacy offset response, which may include a total count and is unstable when records change.
+
 ---
 
 ## Schools
@@ -247,6 +264,7 @@ X-School-ID: SCH-3F2A
 |---|---|---|---|
 | `page` | number | `1` | Page number |
 | `limit` | number | `50` | Results per page (max 200) |
+| `cursor` | string | — | Cursor from the previous response; omit `page` when using it |
 | `class` | string | — | Filter by exact class name (e.g. `Grade 5A`) |
 | `status` | string | — | Filter by payment status: `paid`, `unpaid`, or `partial` |
 | `search` | string | — | Case-insensitive match on `name` or `studentId` |
@@ -257,7 +275,7 @@ Filters can be combined (e.g. `?class=Grade+5A&status=unpaid&search=ali`).
 ```json
 {
   "students": [{ "studentId": "STU001", "name": "Alice Johnson", "class": "Grade 5A", "feeAmount": 250, "feePaid": true }],
-  "total": 1, "page": 1, "limit": 50
+  "pagination": { "limit": 50, "nextCursor": null, "hasPreviousPage": false, "hasNextPage": false }
 }
 ```
 
@@ -585,10 +603,10 @@ Promotes `pending_confirmation` payments to `confirmed` once the ledger threshol
 
 ### Get all payments
 ```
-GET /api/payments
+GET /api/payments?limit=50
 X-School-ID: SCH-3F2A
 ```
-**Response `200`** — array of payment objects for the school.
+Use `cursor=<nextCursor>` from the preceding response to continue. **Response `200`** includes `payments` and cursor metadata without a total count. Explicit `page` selects legacy offset pagination during deprecation.
 
 ### Get payment summary
 ```
@@ -1094,6 +1112,7 @@ Returns a paginated list of audit log entries for the school.
 |---|---|---|
 | `page` | number | Page number (default: `1`) |
 | `limit` | number | Results per page (default: `50`, max `200`) |
+| `cursor` | string | Opaque cursor from the previous response |
 | `action` | string | Filter by action type (e.g. `payment.verified`, `student.created`) |
 
 **Response `200`**
@@ -1102,7 +1121,10 @@ Returns a paginated list of audit log entries for the school.
   "logs": [
     { "_id": "...", "schoolId": "SCH-3F2A", "action": "payment.verified", "actor": "admin", "meta": {}, "createdAt": "2026-03-24T10:00:00.000Z" }
   ],
-  "total": 1, "page": 1, "limit": 50
+  "limit": 50,
+  "nextCursor": null,
+  "hasPreviousPage": false,
+  "hasNextPage": false
 }
 ```
 

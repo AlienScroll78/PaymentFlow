@@ -57,6 +57,7 @@ const {
   validateCreatePaymentIntent,
   validateVerifyPayment,
   validateSubmitTransaction,
+  validatePagination,
 } = require('../middleware/validate');
 const { resolveSchool } = require('../middleware/schoolContext');
 const idempotencyMiddleware = require('../middleware/idempotency');
@@ -181,7 +182,7 @@ router.post(
 router.use(resolveSchool);
 
 // Payment read endpoints now require authentication (Issue #1040)
-router.get("/", requireSchoolAuth(), getAllPayments);
+router.get("/", requireSchoolAuth(), validatePagination, getAllPayments);
 router.get("/summary", requireSchoolAuth(), getPaymentSummary);
 router.get("/accepted-assets", requireSchoolAuth(), getAcceptedAssets);
 router.get("/limits", requireSchoolAuth(), getPaymentLimitsEndpoint);
