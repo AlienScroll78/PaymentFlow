@@ -191,6 +191,7 @@ app.use('/api/fee-adjustments', feeAdjustmentRoutes);
 app.use('/api/email-deliveries', emailDeliveryRoutes);
 app.use('/api/email-provider-webhook', emailProviderWebhookRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/emergency', require('./routes/emergencyRoutes'));
 app.use('/api/auth', authRoutes);
 app.use('/api/webhook-endpoints', webhookEndpointRoutes);
 app.use('/api/webhook-deliveries', webhookDeliveryRoutes);
