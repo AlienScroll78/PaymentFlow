@@ -74,6 +74,7 @@ const studentSchema = new mongoose.Schema(
     disputeHold: { type: Boolean, default: false, index: true },
 
     // Audit fields
+    graduatedAt: { type: Date, default: null, index: true },
     dateOfBirth: { type: Date },
     gender: { type: String },
     parentName: { type: String },

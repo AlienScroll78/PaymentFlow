@@ -465,16 +465,26 @@ async function exportAuditLogs(filters = {}) {
  * archiveAuditLogs — marks records older than retentionDays as archived=true.
  * Records are never deleted; archiving signals they can be exported to cold storage.
  */
-async function archiveAuditLogs(retentionDays = 730) {
+async function archiveAuditLogs(retentionDays = 90, { batchSize = 500 } = {}) {
   const expiry = new Date(Date.now() - retentionDays * 86400000);
-  const result = await AuditLog.updateMany(
-    { createdAt: { $lt: expiry }, archived: false },
-    { $set: { archived: true } },
-  ).bypassTenantScope();
-  if (result.modifiedCount > 0) {
-    logger.info('AUDIT_LOG_ARCHIVE', { archivedCount: result.modifiedCount });
+  const filter = { createdAt: { $lt: expiry }, archived: false };
+  let archivedCount = 0;
+  while (true) {
+    const entries = await AuditLog.find(filter)
+      .bypassTenantScope()
+      .select('_id')
+      .sort({ _id: 1 })
+      .limit(batchSize)
+      .lean();
+    if (!entries.length) break;
+    const result = await AuditLog.updateMany(
+      { _id: { $in: entries.map((entry) => entry._id) } },
+      { $set: { archived: true } },
+    ).bypassTenantScope();
+    archivedCount += result.modifiedCount || 0;
   }
-  return result.modifiedCount;
+  if (archivedCount > 0) logger.info('AUDIT_LOG_ARCHIVE', { archivedCount });
+  return archivedCount;
 }
 
 module.exports = {

@@ -35,6 +35,7 @@ const {
 const { requireAdminAuth } = require('../middleware/auth');
 const { auditContext } = require('../middleware/auditContext');
 const { triggerRun, getDiscrepancies, reviewDiscrepancy } = require('../controllers/reconciliationAdminController');
+const { runRetentionHandler, previewRetentionHandler, listDeletionCertificates } = require('../controllers/retentionController');
 
 // POST /api/admin/log-level — change log level at runtime
 router.post('/log-level', requireAdminAuth, auditContext, setLogLevel);
@@ -73,6 +74,11 @@ router.get('/outbox/dead-letter/:eventId', requireAdminAuth, getDeadLetterEventD
 router.post('/outbox/dead-letter/:eventId/replay', requireAdminAuth, auditContext, replayDeadLetterEvent);
 router.delete('/outbox/dead-letter/:eventId', requireAdminAuth, auditContext, discardDeadLetterEvent);
 router.get('/outbox/stats', requireAdminAuth, getOutboxStats);
+
+// Data retention operations and immutable deletion certificates.
+router.post('/retention/run', requireAdminAuth, auditContext, runRetentionHandler);
+router.get('/retention/preview', requireAdminAuth, previewRetentionHandler);
+router.get('/retention/certificates', requireAdminAuth, listDeletionCertificates);
 
 // Provider reconciliation job — Issue #33
 // Trigger a bounded, idempotent reconciliation run and inspect discrepancy records.
