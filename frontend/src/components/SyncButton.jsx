@@ -9,6 +9,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { syncPayments } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
+import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
 
 export default function SyncButton({ onSyncComplete, lastSyncTime }) {
   const { t } = useTranslation();
@@ -30,7 +31,11 @@ export default function SyncButton({ onSyncComplete, lastSyncTime }) {
     }
   }
 
-  const formattedLastSync = lastSyncTime ? new Date(lastSyncTime).toLocaleString() : t("actions.never");
+  const formattedLastSync = (() => {
+    if (!lastSyncTime) return t("actions.never");
+    const { formatted, label } = formatTimestamp(lastSyncTime, { mode: DISPLAY_MODE.LOCAL });
+    return label ? `${formatted} ${label}` : formatted;
+  })();
 
   return (
     <>

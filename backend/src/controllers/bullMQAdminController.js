@@ -152,10 +152,90 @@ async function getQueueStats(req, res, next) {
   }
 }
 
+/**
+ * GET /api/admin/retry-queue/dlq
+ * List dead-lettered jobs in BullMQ DLQ
+ */
+async function listDeadLetterJobs(req, res, next) {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    const result = await bullMQRetryService.listDeadLetterJobs({ limit, offset });
+    res.json(result);
+  } catch (err) {
+    logger.error('Failed to list dead-letter jobs', { error: err.message });
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/retry-queue/dlq/:jobId
+ * Inspect details of a specific dead-letter job
+ */
+async function getDeadLetterJobDetails(req, res, next) {
+  try {
+    const { jobId } = req.params;
+    const jobDetails = await bullMQRetryService.getDeadLetterJobDetails(jobId);
+    res.json(jobDetails);
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({
+        error: `Dead-letter job ${req.params.jobId} not found`,
+        code: 'JOB_NOT_FOUND',
+      });
+    }
+    logger.error('Failed to get dead-letter job details', { jobId: req.params.jobId, error: err.message });
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/retry-queue/dlq/:jobId/replay
+ * Controlled, idempotent replay of a dead-letter job
+ */
+async function replayDeadLetterJob(req, res, next) {
+  try {
+    const { jobId } = req.params;
+    const result = await bullMQRetryService.replayDeadLetterJob(jobId, {
+      performedBy: req.auditContext?.performedBy || 'admin',
+    });
+
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: 'system',
+        action: 'replay_dead_letter_job',
+        performedBy: req.auditContext.performedBy,
+        targetId: jobId,
+        targetType: 'dead_letter_job',
+        details: { jobId, transactionHash: result.transactionHash, idempotent: result.idempotent },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
+    logger.info('Replayed dead-letter job', { jobId, result });
+    res.json(result);
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({
+        error: `Dead-letter job ${req.params.jobId} not found`,
+        code: 'JOB_NOT_FOUND',
+      });
+    }
+    logger.error('Failed to replay dead-letter job', { jobId: req.params.jobId, error: err.message });
+    next(err);
+  }
+}
+
 module.exports = {
   listFailedJobs,
   getFailedJobDetails,
   retryFailedJob,
   discardFailedJob,
   getQueueStats,
+  listDeadLetterJobs,
+  getDeadLetterJobDetails,
+  replayDeadLetterJob,
 };

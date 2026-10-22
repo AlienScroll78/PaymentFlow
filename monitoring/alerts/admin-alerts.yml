@@ -8,3 +8,7 @@ groups:
           severity: critical
         annotations:
           summary: Admin alert fired
+          description: >
+            An admin alert has been triggered (send_admin_alert_total has
+            increased in the last 5 minutes). Check application logs for
+            the alert details.

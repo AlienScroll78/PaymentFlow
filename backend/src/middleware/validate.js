@@ -12,6 +12,18 @@ const {
   getPaymentInstructionsQuerySchema,
 } = require('./schemas/paymentQuerySchemas');
 
+const {
+  paginationSchema,
+  exportPaginationSchema,
+  auditQuerySchema,
+  updateStudentSchema,
+  createDisputeSchema,
+  createFeeAdjustmentSchema,
+  createWebhookEndpointSchema,
+  createSchoolSchema,
+  updateSchoolSchema,
+} = require('./schemas/requestLimitSchemas');
+
 function validate(schema, source = 'body') {
   return (req, res, next) => {
     const { error, value } = schema.validate(req[source], {
@@ -143,6 +155,181 @@ function validateFeeStructure(req, res, next) {
   return next();
 }
 
+// ── Request-limit middleware (Issue #41) ──────────────────────────────────────
+
+/**
+ * Validate pagination query params (page, limit) before any DB query.
+ * Applies to all list endpoints. Allows unknown params through.
+ */
+function validatePagination(req, res, next) {
+  const { error, value } = paginationSchema.validate(req.query, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.query = { ...req.query, ...value };
+  return next();
+}
+
+/**
+ * Validate export pagination — allows up to 10 000 rows.
+ */
+function validateExportPagination(req, res, next) {
+  const { error, value } = exportPaginationSchema.validate(req.query, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.query = { ...req.query, ...value };
+  return next();
+}
+
+/**
+ * Validate audit log query parameters — enforces max lengths on all filter
+ * strings before they reach the DB layer.
+ */
+function validateAuditQuery(req, res, next) {
+  const { error, value } = auditQuerySchema.validate(req.query, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.query = value;
+  return next();
+}
+
+/**
+ * Validate PUT /api/students/:studentId body.
+ */
+function validateUpdateStudent(req, res, next) {
+  const { error, value } = updateStudentSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
+/**
+ * Validate POST /api/disputes body.
+ */
+function validateCreateDispute(req, res, next) {
+  const { error, value } = createDisputeSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
+/**
+ * Validate POST /api/fee-adjustments body.
+ */
+function validateCreateFeeAdjustment(req, res, next) {
+  const { error, value } = createFeeAdjustmentSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
+/**
+ * Validate POST /api/webhooks/endpoints body.
+ */
+function validateCreateWebhookEndpoint(req, res, next) {
+  const { error, value } = createWebhookEndpointSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
+/**
+ * Validate POST /api/schools body.
+ */
+function validateCreateSchool(req, res, next) {
+  const { error, value } = createSchoolSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
+/**
+ * Validate PUT /api/schools/:id body.
+ */
+function validateUpdateSchool(req, res, next) {
+  const { error, value } = updateSchoolSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((d) => ({
+      field:   d.context?.key || d.path.join('.') || 'unknown',
+      message: d.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+  }
+  req.body = value;
+  return next();
+}
+
 module.exports = {
   validate,
   validateCreatePaymentIntent,
@@ -153,4 +340,14 @@ module.exports = {
   validateTxHashParam,
   validateRegisterStudent,
   validateFeeStructure,
+  // Issue #41 — request body and parameter limits
+  validatePagination,
+  validateExportPagination,
+  validateAuditQuery,
+  validateUpdateStudent,
+  validateCreateDispute,
+  validateCreateFeeAdjustment,
+  validateCreateWebhookEndpoint,
+  validateCreateSchool,
+  validateUpdateSchool,
 };

@@ -5,10 +5,29 @@ const FeeStructure = require('../models/feeStructureModel');
 const { get, set, del, KEYS, TTL } = require('../cache');
 const { logAudit } = require('../services/auditService');
 const logger = require('../utils/logger');
+const { validateDecimalAmount, toDecimalString } = require('../utils/decimalPrecision');
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function audit(req, action, targetId, details) {
   if (!req.auditContext) return Promise.resolve();
   return logAudit({ schoolId: req.schoolId, action, performedBy: req.auditContext.performedBy, targetId, targetType: 'fee', details, result: 'success', ipAddress: req.auditContext.ipAddress, userAgent: req.auditContext.userAgent });
+}
+
+/**
+ * Validate and normalise a feeAmount value at the API boundary.
+ * Returns { ok: true, amount: Number } or calls next() with a VALIDATION_ERROR
+ * and returns false so the caller can return immediately.
+ */
+function normaliseFeeAmount(raw, next) {
+  const result = validateDecimalAmount(raw, { minValue: 0 });
+  if (!result.ok) {
+    next(Object.assign(new Error(result.error), { code: result.code || 'VALIDATION_ERROR', status: 400 }));
+    return null;
+  }
+  // Store as Number (BSON double).  Precision is guaranteed by validateDecimalAmount
+  // because we only reach here when actualDp <= 7 and the value is within range.
+  return result.value.toNumber();
 }
 
 async function createFeeStructure(req, res, next) {
@@ -17,12 +36,15 @@ async function createFeeStructure(req, res, next) {
     const { className, feeAmount, description, academicYear, paymentDeadline } = req.body;
     if (!className || feeAmount == null) return next(Object.assign(new Error('className and feeAmount are required'), { code: 'VALIDATION_ERROR' }));
 
+    const normalisedFeeAmount = normaliseFeeAmount(feeAmount, next);
+    if (normalisedFeeAmount === null) return;
+
     const existing = await FeeStructure.findOne({ schoolId, className, isActive: true });
     if (existing) return next(Object.assign(new Error(`Active fee structure already exists for class ${className}`), { code: 'DUPLICATE_FEE_STRUCTURE', status: 409 }));
 
-    const fee = await FeeStructure.create({ schoolId, className, feeAmount, description, academicYear: academicYear || new Date().getUTCFullYear().toString(), isActive: true, paymentDeadline: paymentDeadline || null });
+    const fee = await FeeStructure.create({ schoolId, className, feeAmount: normalisedFeeAmount, description, academicYear: academicYear || new Date().getUTCFullYear().toString(), isActive: true, paymentDeadline: paymentDeadline || null });
     del(KEYS.feesAll(), KEYS.feeByClass(className));
-    await audit(req, 'fee_create', className, { className, feeAmount, academicYear });
+    await audit(req, 'fee_create', className, { className, feeAmount: normalisedFeeAmount, academicYear });
     res.status(201).json(fee);
   } catch (err) { next(err); }
 }
@@ -96,7 +118,10 @@ async function updateFeeStructure(req, res, next) {
     const { feeAmount, description, academicYear, paymentDeadline, cascadeToStudents } = req.body;
     if (feeAmount == null) return next(Object.assign(new Error('feeAmount is required'), { code: 'VALIDATION_ERROR' }));
 
-    const updateFields = { feeAmount };
+    const normalisedFeeAmount = normaliseFeeAmount(feeAmount, next);
+    if (normalisedFeeAmount === null) return;
+
+    const updateFields = { feeAmount: normalisedFeeAmount };
     if (description    !== undefined) updateFields.description    = description;
     if (academicYear   !== undefined) updateFields.academicYear   = academicYear;
     if (paymentDeadline !== undefined) updateFields.paymentDeadline = paymentDeadline;
