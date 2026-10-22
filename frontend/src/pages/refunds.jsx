@@ -6,6 +6,7 @@ import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import ConfirmDialog, { CONFIRM_TIER } from "../components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
+import { useAbortController } from "../hooks/useAbortController";
 
 const STATUS_META = {
   approval_pending: { cls: "badge-warning",  labelKey: "status.refund.approval_pending", color: "var(--warning)" },
@@ -281,6 +282,9 @@ function Refunds() {
   const [statusFilter, setStatusFilter] = useState("approval_pending");
   const [user, setUser] = useState(null);
 
+  // Issue #254 — abort in-flight refund requests when the component unmounts.
+  const { signal } = useAbortController();
+
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -296,15 +300,19 @@ function Refunds() {
       limit: PAGE_SIZE,
       ...(statusFilter && statusFilter !== "all" && { status: statusFilter }),
     };
-    getSchoolRefunds(params)
+    getSchoolRefunds(params, { signal })
       .then(({ data }) => {
         setRefunds(Array.isArray(data.refunds) ? data.refunds : []);
         setPages(data.pages || 1);
         setTotal(data.total || 0);
       })
-      .catch(() => setError(t("refunds.failedToLoad")))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError(t("refunds.failedToLoad"));
+      })
       .finally(() => setLoading(false));
-  }, [page, statusFilter, t]);
+  }, [page, statusFilter, t, signal]);
 
   useEffect(() => {
     fetchRefunds();
