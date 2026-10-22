@@ -9,6 +9,7 @@ const { getAuditHealth } = require('../services/auditService');
 const { getRedisStatus, checkRedis, isRedisRequired } = require('../config/redisClient');
 const { checkLiveness, WORKER_NAMES } = require('../services/workerHeartbeat');
 const { getRecoveryStatus } = require('../queue/transactionQueue');
+const { getHealthSummary: getProviderCircuitBreakerSummary } = require('../services/providerCircuitBreakerRegistry');
 const logger = require('../utils/logger');
 const { isReady: isShutdownReady } = require('../services/shutdownManager');
 
@@ -184,6 +185,13 @@ async function healthCheck(req, res) {
     };
   });
 
+  // Provider circuit breaker status — surface open/half-open breakers as degraded
+  // so on-call engineers can see which provider is down without checking Prometheus.
+  const providerCBSummary = getProviderCircuitBreakerSummary();
+  if (!providerCBSummary.allHealthy && overallStatus === 'healthy') {
+    overallStatus = 'degraded';
+  }
+
   const body = {
     status: overallStatus,
     timestamp: new Date().toISOString(),
@@ -241,6 +249,7 @@ async function healthCheck(req, res) {
       },
       auditLog: getAuditHealth(),
       jobRecovery,
+      providerCircuitBreakers: providerCBSummary,
       workers: {
         healthy: workerLiveness.allHealthy,
         detail: workerLiveness.workers,
