@@ -16,6 +16,7 @@ const {
   recordPayment,
   validatePaymentWithDynamicFee,
   determineConfirmationState,
+  pollForLedgerInclusion,
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
 const { server } = require('../config/stellarConfig');
@@ -244,6 +245,8 @@ async function submitTransaction(req, res, next) {
     paymentRecord.submittedAt = new Date();
     await paymentRecord.save();
 
+    // Submit the XDR to Horizon. A submission error (network/SDK) means the tx
+    // was never broadcast — fail immediately without polling.
     let txResponse;
     try {
       txResponse = await withStellarRetry(() => server.submitTransaction(tx), { label: 'submitTransaction' });
@@ -255,17 +258,41 @@ async function submitTransaction(req, res, next) {
       return res.status(400).json({ error: 'Transaction submission failed', code: 'TX_SUBMISSION_FAILED' });
     }
 
-    if (!txResponse.successful) {
+    // Horizon's submitTransaction response indicates the tx was accepted for
+    // broadcast, but finality is only guaranteed once the transaction is
+    // observed in a CLOSED ledger at CONFIRMED state or above — poll Horizon
+    // until that threshold is met or the timeout expires (default 5 min).
+    //
+    // The polling loop reuses determineConfirmationState (same path as
+    // verifyPayment and syncPaymentsForSchool) making re-checks idempotent.
+    // If the tx fails on-chain (successful===false) the poll returns
+    // TX_FAILED_ON_CHAIN immediately without waiting for the timeout.
+    const pollResult = await pollForLedgerInclusion(paymentRecord, normalizedHash);
+
+    if (pollResult.status === 'FAILED') {
       paymentRecord.status = 'FAILED';
       paymentRecord.confirmationStatus = 'failed';
-      paymentRecord.suspicionReason = 'Transaction was included in ledger but failed on-chain';
+      paymentRecord.confirmationState = pollResult.confirmationState;
+      paymentRecord.suspicionReason = pollResult.failureReason;
       await paymentRecord.save();
-      return res.status(400).json({ error: 'Transaction was included in the ledger but failed on-chain', code: 'TX_FAILED', hash: transactionHash });
+
+      const httpStatus = pollResult.failureReason === 'TX_FAILED_ON_CHAIN' ? 400 : 202;
+      return res.status(httpStatus).json({
+        error: pollResult.failureReason === 'TX_FAILED_ON_CHAIN'
+          ? 'Transaction was included in the ledger but failed on-chain'
+          : 'Transaction submitted but ledger finality could not be confirmed within the timeout period',
+        code: pollResult.failureReason,
+        hash: normalizedHash,
+        status: 'FAILED',
+      });
     }
 
+    // Poll succeeded — transaction reached CONFIRMED or FINALIZED state.
     paymentRecord.status = 'SUCCESS';
     paymentRecord.confirmedAt = new Date();
-    paymentRecord.ledgerSequence = txResponse.ledger;
+    paymentRecord.ledgerSequence = pollResult.ledger || txResponse.ledger;
+    paymentRecord.confirmationState = pollResult.confirmationState;
+    paymentRecord.confirmationStatus = pollResult.confirmationStatus;
     await paymentRecord.save();
 
     // Issue #1034: Update student balance fields using the unified balance updater.
@@ -287,8 +314,9 @@ async function submitTransaction(req, res, next) {
     res.json({
       verified: true,
       hash: normalizedHash,
-      ledger: txResponse.ledger,
+      ledger: pollResult.ledger || txResponse.ledger,
       status: 'SUCCESS',
+      confirmationState: pollResult.confirmationState,
       explorerUrl: `https://stellar.expert/explorer/${network}/tx/${transactionHash}`,
     });
   } catch (err) {
