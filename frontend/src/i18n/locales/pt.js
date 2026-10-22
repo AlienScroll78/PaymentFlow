@@ -218,6 +218,11 @@ const pt = {
   components: {
     testnetBanner: "TESTNET — Não envie fundos reais",
   },
+
+  offlineBanner: {
+    message: "Você está offline.",
+    submsg: "As ações de pagamento estão desativadas. Os dados serão atualizados automaticamente ao se reconectar.",
+  },
 };
 
 export default pt;

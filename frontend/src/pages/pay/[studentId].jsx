@@ -4,6 +4,7 @@ import PaymentForm from "../../components/PaymentForm";
 import VerifyPayment from "../../components/VerifyPayment";
 import SseDegradedBanner from "../../components/SseDegradedBanner";
 import { usePaymentEvents } from "../../hooks/usePaymentEvents";
+import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useAdminAuthContext } from "../../hooks/AdminAuthContext";
 import { useTranslation } from "react-i18next";
 
@@ -14,9 +15,8 @@ export default function PayFeesForStudent() {
   const { t } = useTranslation();
   const { studentId } = router.query;
   const { degraded, connectionStatus } = usePaymentEvents();
-  // #253 — pass the JWT expiry timestamp to PaymentForm so it can show a
-  // session-expiry warning toast 5 minutes before the token expires.
-  const { tokenExp } = useAdminAuthContext();
+  // Track network connectivity to disable mutation actions while offline (Issue #269).
+  const { isOnline } = useOnlineStatus();
 
   return (
     <>
@@ -34,8 +34,8 @@ export default function PayFeesForStudent() {
         </div>
 
         <div className="payfees-grid">
-          {typeof studentId === "string" && <PaymentForm initialStudentId={studentId} tokenExp={tokenExp} />}
-          <VerifyPayment />
+          {typeof studentId === "string" && <PaymentForm initialStudentId={studentId} disabled={!isOnline} />}
+          <VerifyPayment disabled={!isOnline} />
         </div>
       </div>
     </>

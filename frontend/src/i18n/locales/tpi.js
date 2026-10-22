@@ -218,6 +218,11 @@ const tpi = {
   components: {
     testnetBanner: "TESTNET — No salim manimani tru",
   },
+
+  offlineBanner: {
+    message: "Yu no gat intanet.",
+    submsg: "Pesmen aksion i pas. Infomesen bai kamap bek wantem yu konektem gen.",
+  },
 };
 
 export default tpi;

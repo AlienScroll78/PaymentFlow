@@ -33,6 +33,7 @@ import Navbar from "../components/Navbar";
 import BottomNav from "../components/BottomNav";
 import AppLayout from "../components/AppLayout";
 import ErrorBoundary from "../components/ErrorBoundary";
+import OfflineBanner from "../components/OfflineBanner";
 import { AdminAuthProvider } from "../hooks/AdminAuthContext";
 import i18n, { SUPPORTED_LOCALES } from "../i18n";
 
@@ -103,6 +104,7 @@ export default function MyApp({ Component, pageProps }) {
         <Head>
           <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         </Head>
+        <OfflineBanner />
         <Navbar />
 
         {/* App-level boundary: last-resort catch for anything the route boundary misses */}

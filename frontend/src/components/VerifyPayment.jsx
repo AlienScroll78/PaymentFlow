@@ -92,7 +92,7 @@ function InfoRow({ label, children, mono }) {
   );
 }
 
-export default function VerifyPayment() {
+export default function VerifyPayment({ disabled = false }) {
   const { t } = useTranslation();
   const [txHash, setTxHash]               = useState("");
   const [result, setResult]               = useState(null);
@@ -207,7 +207,7 @@ export default function VerifyPayment() {
           </div>
           <button
             type="submit"
-            disabled={loading || !txHash.trim()}
+            disabled={loading || !txHash.trim() || disabled}
             className="btn btn-dark"
             style={{ width: "100%" }}
           >

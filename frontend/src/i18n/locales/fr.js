@@ -757,6 +757,12 @@ const fr = {
     failed: "Mises à jour en direct indisponibles — actualisez la page pour restaurer les données en temps réel.",
     reconnecting: "Reconnexion aux mises à jour en direct…",
     degraded: "Mises à jour en temps réel dégradées — certains événements peuvent ne pas s'afficher tant que la connexion n'est pas rétablie.",
+    verifyManually: "Vérifier manuellement",
+  },
+
+  offlineBanner: {
+    message: "Vous êtes hors ligne.",
+    submsg: "Les actions de paiement sont désactivées. Les données seront actualisées automatiquement lorsque vous vous reconnecterez.",
   },
 
   errorBoundary: {

@@ -15,6 +15,7 @@ import { SkeletonStatCard, SkeletonTableRow } from "../components/Skeleton";
 import FilterChips from "../components/FilterChips"; // Issue #107
 import Pagination from "../components/Pagination";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { useRouteChangeAbort } from "../hooks/useRouteChangeAbort";
 import useGridCellNavigation from "../hooks/useGridCellNavigation";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
@@ -77,9 +78,8 @@ function Dashboard() {
     },
   });
 
-  // Issue #6 — abort page-level requests when the user navigates away.
-  // The returned signal is passed to fetchSummary / initial data loads below.
-  const { signal: routeSignal } = useRouteChangeAbort();
+  // Offline / reconnection tracking (Issue #269).
+  const { justReconnected } = useOnlineStatus();
 
   const searchDebounceRef = useRef(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -174,6 +174,16 @@ function Dashboard() {
     }
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
   }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Issue #269 — automatically refresh data when network connectivity is
+  // restored after an offline period.
+  useEffect(() => {
+    if (justReconnected) {
+      fetchSummary();
+      fetchStudents(1, debouncedSearch, statusFilter, classFilter);
+      setPage(1);
+    }
+  }, [justReconnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSyncComplete(data) {
     setLastSyncAt(new Date().toISOString());
