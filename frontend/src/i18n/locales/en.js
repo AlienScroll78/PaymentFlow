@@ -941,6 +941,12 @@ const en = {
     applyRange: "Apply",
     customRange: "Custom range",
   },
+
+  sessionExpiry: {
+    warningToast: "Your session will expire in {{minutes}} minutes. Please save your work.",
+    draftRestored: "Your draft was restored from before your session expired.",
+    discardDraft: "Discard",
+  },
 };
 
 export default en;
