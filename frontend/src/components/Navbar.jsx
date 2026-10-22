@@ -195,7 +195,8 @@ export default function Navbar() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 32px; height: 32px;
+          /* 44×44 pt minimum touch target */
+          width: 44px; height: 44px;
           background: rgba(255, 255, 255, 0.06);
           border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
@@ -269,7 +270,8 @@ export default function Navbar() {
           display: none;
           align-items: center;
           justify-content: center;
-          width: 36px; height: 36px;
+          /* 44×44 pt minimum touch target — Apple HIG / Material */
+          width: 44px; height: 44px;
           background: rgba(255, 255, 255, 0.06);
           border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 7px;
@@ -380,36 +382,13 @@ export default function Navbar() {
           background: rgba(255,255,255,0.07);
           margin: 0.5rem 0;
         }
-        .nav-mobile-footer {
-          padding: 0.875rem 1.25rem 1.25rem;
-          border-top: 1px solid rgba(255, 255, 255, 0.07);
-          display: flex;
-          flex-direction: column;
-          gap: 0.5rem;
-          flex-shrink: 0;
-        }
-        .nav-mobile-footer-row {
+        /* Mobile nav links need ≥44pt touch targets */
+        .nav-mobile .nav-link {
+          min-height: 44px;
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          padding: 0.625rem 0.75rem;
         }
-        .nav-mobile-lang {
-          flex: 1;
-          appearance: none;
-          background: rgba(255, 255, 255, 0.06);
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 7px;
-          color: rgba(255, 255, 255, 0.8);
-          font: 500 0.85rem/1 inherit;
-          padding: 0.5rem 0.625rem;
-          cursor: pointer;
-          outline: none;
-        }
-        .nav-mobile-lang:focus-visible {
-          outline: 2px solid #34d399;
-          outline-offset: 2px;
-        }
-
         @media (max-width: 720px) {
           .nav-links { display: none; }
           .nav-hamburger { display: flex; }
