@@ -27,7 +27,7 @@ function createQueue() {
         attempts: 2,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: { age: 3600, count: 100 },
-        removeOnFail: false,
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 10000 },
       },
     });
     return reportQueue;
@@ -183,6 +183,8 @@ function startReportWorker(processor) {
       jobId: job?.id,
       error: err.message,
     });
+    require('./deadLetterQueue').moveExhaustedJob(QUEUE_NAME, job, err)
+      .catch((dlqError) => logger.error('[ReportQueue] Failed to move exhausted job to DLQ', { jobId: job?.id, error: dlqError.message }));
   });
 
   logger.info('[ReportQueue] Worker started', {

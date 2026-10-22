@@ -158,13 +158,53 @@ async function getQueueStats(req, res, next) {
  */
 async function listDeadLetterJobs(req, res, next) {
   try {
-    const limit = parseInt(req.query.limit, 10) || 50;
-    const offset = parseInt(req.query.offset, 10) || 0;
-
-    const result = await bullMQRetryService.listDeadLetterJobs({ limit, offset });
-    res.json(result);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const retryResult = await bullMQRetryService.listDeadLetterJobs({ limit, offset });
+    const genericDlq = require('../queue/deadLetterQueue');
+    const genericResults = await Promise.all(genericDlq.SUPPORTED_QUEUES.map((queueName) =>
+      genericDlq.listDeadLetterJobs(queueName, { limit, offset })
+    ));
+    const jobs = [
+      ...retryResult.jobs.map((job) => ({ ...job, originalQueue: 'transaction-retry-queue' })),
+      ...genericResults.flatMap((result) => result.jobs),
+    ].sort((left, right) => Date.parse(right.failedAt || right.createdAt) - Date.parse(left.failedAt || left.createdAt));
+    res.json({ jobs, total: retryResult.total + genericResults.reduce((sum, result) => sum + result.total, 0), limit, offset });
   } catch (err) {
     logger.error('Failed to list dead-letter jobs', { error: err.message });
+    next(err);
+  }
+}
+
+async function replayQueueDeadLetterJob(req, res, next) {
+  try {
+    const { queue, jobId } = req.params;
+    const deadLetterQueue = require('../queue/deadLetterQueue');
+    if (!deadLetterQueue.SUPPORTED_QUEUES.includes(queue)) {
+      return res.status(400).json({ error: 'Unsupported source queue', code: 'VALIDATION_ERROR' });
+    }
+    const result = await deadLetterQueue.replayDeadLetterJob(queue, jobId);
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: 'system',
+        action: 'replay_dead_letter_job',
+        performedBy: req.auditContext.performedBy,
+        targetId: jobId,
+        targetType: 'dead_letter_job',
+        details: { jobId, sourceQueue: queue, newJobId: result.newJobId },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+    res.json(result);
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: err.message, code: 'JOB_NOT_FOUND' });
+    }
+    if (err.code === 'STATE_CONFLICT') {
+      return res.status(409).json({ error: err.message, code: err.code });
+    }
     next(err);
   }
 }
@@ -238,4 +278,5 @@ module.exports = {
   listDeadLetterJobs,
   getDeadLetterJobDetails,
   replayDeadLetterJob,
+  replayQueueDeadLetterJob,
 };

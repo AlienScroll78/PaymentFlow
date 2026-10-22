@@ -16,6 +16,7 @@ const en = {
     auditLogs: "Audit Logs",
     disputes: "Disputes",
     webhooks: "Webhooks",
+  deadLetter: "Dead-Letter Queue",
     sidebarAria: "Sidebar navigation",
     section: "Navigation",
     language: "Language",

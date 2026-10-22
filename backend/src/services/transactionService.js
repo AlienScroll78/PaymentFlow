@@ -56,6 +56,23 @@ async function savePayment(data, options = {}) {
     return payment;
   } catch (e) {
     if (e.code === 11000) {
+      if (options.allowFailedReplay) {
+        const replayedPayment = await Payment.findOneAndUpdate(
+          { schoolId: data.schoolId, txHash: data.txHash, status: 'FAILED' },
+          { $set: data },
+          { new: true, runValidators: true, session },
+        );
+        if (replayedPayment) {
+          await Outbox.create({
+            eventId: uuidv4(),
+            eventType: 'payment.saved',
+            aggregateId: replayedPayment.txHash,
+            aggregateType: 'payment',
+            payload: replayedPayment.toObject(),
+          }, { session, writeConcern: FINANCIAL_WRITE_CONCERN });
+          return replayedPayment;
+        }
+      }
       const txHash = data.txHash || data.transactionHash;
       const err = new Error(`Transaction ${txHash} has already been processed`);
       err.code = "DUPLICATE_TX";
