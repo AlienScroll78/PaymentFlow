@@ -219,9 +219,25 @@ const es = {
     testnetBanner: "TESTNET — No envíe fondos reales",
   },
 
-  offlineBanner: {
-    message: "Estás sin conexión.",
-    submsg: "Las acciones de pago están deshabilitadas. Los datos se actualizarán automáticamente al reconectarte.",
+  dateRangePicker: {
+    ariaLabel: "Selector de rango de fechas",
+    timezoneLabel: "Fechas en {{tz}}",
+    changeTimezone: "Cambiar zona horaria",
+    hideTimezone: "Ocultar zona horaria",
+    timezoneSelectLabel: "Zona horaria personalizada",
+    presetsLabel: "Rangos de fechas predefinidos",
+    fromLabel: "Desde",
+    toLabel: "Hasta",
+    fromAriaLabel: "Fecha de inicio",
+    toAriaLabel: "Fecha de fin",
+    preset: {
+      today: "Hoy",
+      yesterday: "Ayer",
+      last7: "Últimos 7 días",
+      thisMonth: "Este mes",
+      lastMonth: "Mes pasado",
+      custom: "Personalizado",
+    },
   },
 };
 

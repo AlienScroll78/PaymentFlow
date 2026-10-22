@@ -8,7 +8,7 @@ import {
 import EmptyState from "../components/EmptyState";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
-import EmptyState from "../components/EmptyState";
+import DateRangePicker from "../components/DateRangePicker";
 import { useTranslation } from "react-i18next";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 import { useAuditFilters } from "../hooks/useAuditFilters";
@@ -279,23 +279,14 @@ function AuditLogsContent() {
               />
             </div>
 
-            <div>
-              <label className="al-filter-label">{t("auditLogs.filterFromLabel")}</label>
-              <input
-                type="date"
-                value={filters.startDate}
-                onChange={e => setFilter("startDate", e.target.value)}
-                className="al-filter-input"
-              />
-            </div>
-
-            <div>
-              <label className="al-filter-label">{t("auditLogs.filterToLabel")}</label>
-              <input
-                type="date"
-                value={filters.endDate}
-                onChange={e => setFilter("endDate", e.target.value)}
-                className="al-filter-input"
+            <div style={{ gridColumn: "1 / -1" }}>
+              <DateRangePicker
+                startDate={startDate}
+                endDate={endDate}
+                onChange={({ startDate: s, endDate: e }) => {
+                  setStartDate(s);
+                  setEndDate(e);
+                }}
               />
             </div>
           </div>

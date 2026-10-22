@@ -889,96 +889,25 @@ const en = {
     parentEmailInvalid: "Enter a valid email address",
   },
 
-  // ── Issue #106: Transaction Detail ─────────────────────────────────────────
-  transactionDetail: {
-    title: "Transaction Detail",
-    summaryAria: "Transaction summary",
-    detailsAria: "Transaction details",
-    actionsAria: "Transaction actions",
-    amount: "Amount",
-    status: "Status",
-    date: "Date",
-    validation: "Validation",
-    sectionParties: "Counterparties",
-    sectionTechnical: "Technical Details",
-    sectionReconciliation: "Reconciliation & Audit",
-    studentId: "Student ID",
-    source: "From (wallet)",
-    destination: "To (wallet)",
-    memo: "Memo",
-    txHash: "Transaction Hash",
-    copyHash: "Copy transaction hash",
-    asset: "Asset",
-    ledger: "Ledger",
-    feeCharged: "Network Fee",
-    syncedAt: "Synced At",
-    recordedBy: "Recorded By",
-    recordId: "Record ID",
-    notes: "Notes",
-  },
-
-
-  // ── Issue #107: Filter Chips ─────────────────────────────────────────────────
-  filterChips: {
-    activeLabel: "Filters",
-    activeFiltersAria: "Active filters",
-    chipListAria: "Active filter list",
-    activeFilterCount_one: "{{count}} active filter",
-    activeFilterCount_other: "{{count}} active filters",
-    removeAria: "Remove {{label}}: {{value}}",
-    clearAll: "Clear all",
-    clearAllAria: "Clear all filters",
-  },
-
-  // ── Issue #108: Confirm Dialog ───────────────────────────────────────────────
-  confirmDialog: {
-    typeToConfirm: "Type",
-    typeToConfirmSuffix: "to confirm",
-    typingMatched: "Confirmed — you may proceed",
-  },
-
-  // ── Issue #109: Role-aware nav ───────────────────────────────────────────────
-  // (keys added to the existing nav section; listed here for clarity)
-  // nav.adminRoleBadgeAria and nav.adminOnlyLinkAria are added inline below.
-
-
-  exportJob: {
-    queued: "Export queued — preparing your report…",
-    running: "Generating report… {{progress}}%",
-    runningSubtext: "You can navigate away and return to download when ready.",
-    completed: "Report ready to download",
-    completedExpiry: "Available until {{time}}",
-    download: "Download",
-    failed: "Export failed",
-    retry: "Retry",
-    expired: "Download link has expired.",
-    expiredAction: "Generate a new report to download.",
-    generateNew: "Generate New Report",
-    dismiss: "Dismiss",
-  },
-
-  dateRange: {
-    timezone: "Timezone",
-    timezoneIndicator: "Showing times in {{tz}}",
-    presetToday: "Today",
-    presetYesterday: "Yesterday",
-    presetLast7: "Last 7 days",
-    presetLast30: "Last 30 days",
-    presetThisMonth: "This month",
-    presetLastMonth: "Last month",
-    startDate: "Start date",
-    endDate: "End date",
-    clearDates: "Clear dates",
-    invalidRange: "End date must be after start date",
-    futureDatesWarning: "Future dates selected",
-    applyRange: "Apply",
-    customRange: "Custom range",
-  },
-
-  sessionExpiry: {
-    warningToast: "Your session will expire in {{minutes}} minutes. Please save your work.",
-    draftRestored: "Your draft was restored from before your session expired.",
-    discardDraft: "Discard",
+  dateRangePicker: {
+    ariaLabel: "Date range selector",
+    timezoneLabel: "Dates shown in {{tz}}",
+    changeTimezone: "Change timezone",
+    hideTimezone: "Hide timezone",
+    timezoneSelectLabel: "Timezone override",
+    presetsLabel: "Date range presets",
+    fromLabel: "From",
+    toLabel: "To",
+    fromAriaLabel: "Start date",
+    toAriaLabel: "End date",
+    preset: {
+      today: "Today",
+      yesterday: "Yesterday",
+      last7: "Last 7 Days",
+      thisMonth: "This Month",
+      lastMonth: "Last Month",
+      custom: "Custom",
+    },
   },
 };
 

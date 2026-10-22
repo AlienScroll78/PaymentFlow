@@ -219,9 +219,25 @@ const pt = {
     testnetBanner: "TESTNET — Não envie fundos reais",
   },
 
-  offlineBanner: {
-    message: "Você está offline.",
-    submsg: "As ações de pagamento estão desativadas. Os dados serão atualizados automaticamente ao se reconectar.",
+  dateRangePicker: {
+    ariaLabel: "Seletor de intervalo de datas",
+    timezoneLabel: "Datas em {{tz}}",
+    changeTimezone: "Alterar fuso horário",
+    hideTimezone: "Ocultar fuso horário",
+    timezoneSelectLabel: "Fuso horário personalizado",
+    presetsLabel: "Intervalos de datas predefinidos",
+    fromLabel: "De",
+    toLabel: "Até",
+    fromAriaLabel: "Data de início",
+    toAriaLabel: "Data de fim",
+    preset: {
+      today: "Hoje",
+      yesterday: "Ontem",
+      last7: "Últimos 7 dias",
+      thisMonth: "Este mês",
+      lastMonth: "Mês passado",
+      custom: "Personalizado",
+    },
   },
 };
 

@@ -217,9 +217,25 @@ const ha = {
     testnetBanner: "TESTNET — Kada ka aika kuɗi na gaske",
   },
 
-  offlineBanner: {
-    message: "Ba ka da haɗin intanet.",
-    submsg: "An kashe ayyukan biyan kuɗi. Bayanan za su sabunta kai tsaye lokacin da ka sake haɗawa.",
+  dateRangePicker: {
+    ariaLabel: "Mai zaɓin kewayon kwanan wata",
+    timezoneLabel: "Kwanakin a {{tz}}",
+    changeTimezone: "Canza yankin lokaci",
+    hideTimezone: "Boye yankin lokaci",
+    timezoneSelectLabel: "Yankin lokaci na musamman",
+    presetsLabel: "Kewayon kwanan wata da aka tsara",
+    fromLabel: "Daga",
+    toLabel: "Zuwa",
+    fromAriaLabel: "Ranar farko",
+    toAriaLabel: "Ranar karshe",
+    preset: {
+      today: "Yau",
+      yesterday: "Jiya",
+      last7: "Kwanaki 7 da suka gabata",
+      thisMonth: "Wannan wata",
+      lastMonth: "Watan da ya gabata",
+      custom: "Zaɓi na musamman",
+    },
   },
 };
 
