@@ -573,7 +573,6 @@ async function replayDeadLetterJob(jobId, operatorContext = {}) {
       replayedBy: operatorContext.performedBy || 'admin',
       replayedAt: new Date().toISOString(),
       priority: 1,
-      priority: 1,
     });
 
     // Remove old job from DLQ
