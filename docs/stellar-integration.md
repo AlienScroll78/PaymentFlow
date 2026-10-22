@@ -535,3 +535,58 @@ Any transaction can be verified on a public Stellar explorer without using this 
 - Mainnet: https://stellar.expert/explorer/public
 
 Search by transaction hash or the school wallet address to see the full on-chain record.
+
+---
+
+## Deterministic Test Fixtures
+
+Integration tests that create Stellar accounts ad hoc are difficult to reproduce.
+The `tests/fixtures/contractFixtureAccounts.js` module provides deterministic
+fixture accounts derived from a seed string using Node.js built-in `crypto`.
+
+### Usage
+
+```js
+const { createFixtureAccounts, createTrustlineConfig } = require('./tests/fixtures/contractFixtureAccounts');
+
+// Same seed → same accounts on every run
+const accounts = createFixtureAccounts('my-test-suite-seed');
+
+console.log(accounts.payer.publicKey);      // G... (56 chars, deterministic)
+console.log(accounts.beneficiary.publicKey); // G... (different key)
+console.log(accounts.arbiter.publicKey);     // G...
+
+// Trustline configuration for XLM and USDC
+const trustlines = createTrustlineConfig(accounts);
+```
+
+### Seed behaviour
+
+| Seed | Effect |
+|------|--------|
+| Same seed, same run | Identical accounts |
+| Same seed, different run | Identical accounts (deterministic) |
+| Different seed | Completely different accounts |
+| `FIXTURE_SEED_DEFAULT` | Stable default for shared fixtures |
+
+### Network guard
+
+The fixture module **throws a `NetworkGuardError`** if `STELLAR_NETWORK=mainnet`
+or `STELLAR_NETWORK=public` is set. This prevents fixture accounts from being
+created against production networks accidentally.
+
+```bash
+# Safe — testnet
+STELLAR_NETWORK=testnet node my-test.js
+
+# Safe — unset (defaults to non-production behaviour)
+node my-test.js
+
+# BLOCKED — throws NetworkGuardError
+STELLAR_NETWORK=mainnet node my-test.js
+```
+
+### Secrets are runtime-derived
+
+Secret keys are never hardcoded. They are derived at runtime using `crypto.createHmac`
+over the seed and role label. A different seed produces completely different key material.

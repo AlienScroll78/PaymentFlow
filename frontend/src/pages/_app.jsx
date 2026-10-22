@@ -1,3 +1,17 @@
+/**
+ * _app.jsx — Issue #9
+ *
+ * Error boundary layering:
+ *
+ *   App-level boundary  (outermost — catches anything that escapes a route boundary)
+ *   └─ Route-level boundary  (keyed on `router.pathname` so it auto-resets on navigation)
+ *       └─ Page Component
+ *
+ * The route-level boundary key ensures that navigating away from a broken page
+ * fully unmounts the failed subtree and mounts a fresh boundary, so the user
+ * never sees a stale error screen after clicking a navigation link.
+ */
+
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Head from "next/head";
@@ -27,7 +41,8 @@ const APP_LAYOUT_ROUTES = [
 ];
 
 export default function MyApp({ Component, pageProps }) {
-  const { pathname } = useRouter();
+  const router = useRouter();
+  const { pathname } = router;
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -56,14 +71,21 @@ export default function MyApp({ Component, pageProps }) {
           <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         </Head>
         <Navbar />
+
+        {/* App-level boundary: last-resort catch for anything the route boundary misses */}
         <ErrorBoundary>
-          {useAppLayout ? (
-            <AppLayout>
+          {/* Route-level boundary: keyed on pathname so it resets on every navigation.
+              This ensures a render error on one route doesn't persist after the user
+              navigates to a different route. — Issue #9 */}
+          <ErrorBoundary key={pathname}>
+            {useAppLayout ? (
+              <AppLayout>
+                <Component {...pageProps} />
+              </AppLayout>
+            ) : (
               <Component {...pageProps} />
-            </AppLayout>
-          ) : (
-            <Component {...pageProps} />
-          )}
+            )}
+          </ErrorBoundary>
         </ErrorBoundary>
       </ThemeContext.Provider>
     </AdminAuthProvider>

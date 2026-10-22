@@ -1,85 +1,192 @@
-# UX Review Checklist for Financial Action Screens
+# UX Review Checklist for Financial Actions
 
-This checklist must be completed for every pull request that touches a financial action screen — payment creation, fee structure changes, refunds, disputes, or any other screen where a user commits to a monetary action. Add the completed checklist to your PR description when the PR carries the `ui-ux` label.
+## Purpose
 
----
+This checklist must be attached to every pull request that touches a page or component involved in a financial action — payments, fee adjustments, refunds, disputes, payment plan modifications, or any operation with monetary or irreversible consequences.
 
-## 1. Confirmation Step
+**When to use:** Copy this checklist into your PR description and check off each item before requesting review. Mark items `N/A` (with a brief reason) only when the [Not Applicable](#not-applicable-guidance) guidance below explicitly allows it.
 
-- [ ] The user sees a clear summary of what they are about to commit to (amount, recipient, fee type) **before** the action is irreversible.
-- [ ] Destructive or high-value actions (e.g. refund approval, fee deletion) require a secondary confirmation (modal, type-to-confirm, or step-up auth).
-- [ ] The CTA button copy reflects the action, not a generic label (e.g. "Confirm Payment of 250 XLM" rather than "Submit").
-- [ ] A cancel/back path is always available before the action is executed.
-
-## 2. Error States
-
-- [ ] Every API failure case renders a visible, dismissible error message in the UI — no silent failures.
-- [ ] Error messages are actionable: they tell the user **what went wrong** and **what to do next**.
-- [ ] Network timeouts and retries display a loading indicator and do not leave the UI in an indeterminate state.
-- [ ] 409 Conflict (duplicate idempotency key) is handled gracefully with a "payment already submitted" message rather than a generic error.
-- [ ] Validation errors are shown inline next to the offending field, not only as a banner.
-- [ ] The error element receives focus (`ref.current?.focus()`) so screen readers announce it immediately.
-
-## 3. Accessibility
-
-- [ ] All interactive elements are reachable and operable with keyboard alone (Tab, Shift+Tab, Enter, Space, Escape for modals).
-- [ ] Focus is managed correctly: after opening a modal, focus moves into it; after closing, it returns to the trigger.
-- [ ] All form fields have associated `<label>` elements (or `aria-label` / `aria-labelledby`).
-- [ ] Status messages (success, error, loading) use `role="alert"` or `role="status"` so assistive technology announces them without a page reload.
-- [ ] Color is not the sole means of conveying information (e.g. status badges also use text or icons).
-- [ ] Text contrast meets WCAG AA: ≥ 4.5:1 for normal text, ≥ 3:1 for large text and UI components. Checked with a contrast tool.
-- [ ] The screen has been tested with at least one screen reader (NVDA/JAWS on Windows, VoiceOver on macOS/iOS).
-
-## 4. Mobile / Responsive
-
-- [ ] Layout is usable on a 375 px wide viewport (iPhone SE baseline) without horizontal scrolling.
-- [ ] Touch targets are at least 44 × 44 px (WCAG 2.5.5) for all actionable elements.
-- [ ] Long strings (wallet addresses, tx hashes) break or truncate gracefully — no overflow outside the card.
-- [ ] The virtual keyboard on mobile does not obscure the active input field or the submit button.
-- [ ] QR codes (where present) are at least 200 × 200 px so they remain scannable on a mobile screen.
-
-## 5. Copy & Financial Language
-
-- [ ] Currency and amounts are formatted consistently (e.g. `250 XLM`, `$10.00 USD`) — no ambiguous units.
-- [ ] Financial jargon is avoided or explained inline (e.g. "Stellar Lumens (XLM)" on first mention).
-- [ ] Copy has been reviewed for plain language: ideally readable at a Grade 8 reading level.
-- [ ] Success and confirmation messages specify exactly what was done (amount, student ID, date) — not just "Success!".
-- [ ] All user-visible strings are present in every supported locale (`en`, `fr`) with no untranslated fallbacks.
-
-## 6. Undo / Reversal Path
-
-- [ ] If the action is irreversible (e.g. blockchain payment), the user is warned **before** they commit.
-- [ ] Where reversal is possible (disputes, refunds), the UI surfaces the path clearly on the relevant record.
-- [ ] Accidental submissions can be corrected within a reasonable time window without contacting support (e.g. a dispute form is accessible directly from the payment history).
+Reviewers should not approve a PR where unchecked items lack a documented `N/A` justification.
 
 ---
 
-## Baseline Reviews
+## 1. Clarity
 
-The following screens have been reviewed against this checklist as the initial baseline. Each review is documented in the linked PR.
+The user must understand exactly what they are about to do and what the consequences are before they act.
 
-| Screen | PR | Reviewer | Date |
-|--------|----|----------|------|
-| Payment Verification (`VerifyPayment.jsx`) | #260 | TBD | 2026-Q4 |
-| Payment Instructions / QR (`PaymentForm.jsx`) | #260 | TBD | 2026-Q4 |
-| Dispute Submission (`DisputeForm.jsx`) | #363 | TBD | 2026-Q4 |
-
----
-
-## Review Sign-off
-
-| Role | Name | Approved |
-|------|------|---------|
-| UX Designer | | ☐ |
-| Accessibility Lead | | ☐ |
-| Engineering Lead | | ☐ |
+- [ ] The action is described in plain language — no jargon, no ambiguous labels (e.g., "Submit Payment of 250 XLM to School Wallet" not just "Submit").
+- [ ] The full amount and currency/asset are visible on the confirmation screen (e.g., "250 XLM" or "100.00 USDC" — never bare numbers without units).
+- [ ] The destination (school name, wallet address prefix) is shown before the user confirms.
+- [ ] Consequences of the action are stated where relevant (e.g., "This payment is final and cannot be reversed on-chain.").
+- [ ] If the action affects multiple students or records, the count and scope are explicitly stated.
 
 ---
 
-## Maintenance
+## 2. Confirmation
 
-This checklist is reviewed and updated each quarter. Lessons from production feedback, user testing, and accessibility audits are incorporated. The owner of each quarterly update adds a row to the table below.
+Destructive or irreversible actions must require a deliberate, separate confirmation step.
 
-| Quarter | Changes Made | Owner |
-|---------|-------------|-------|
-| 2026-Q4 | Initial version published | #363 |
+- [ ] Any action that cannot be undone (payment submission, dispute resolution, fee structure deletion) requires an explicit confirmation step beyond the initial form submit.
+- [ ] The confirmation step is visually distinct from the form — it is a separate modal, page, or clearly bounded review panel, not just a second click on the same button.
+- [ ] The confirmation shows a summary of what will happen: amount, recipient, student ID, and asset.
+- [ ] Bulk actions (bulk student import, mass reminder send) show a count and allow the user to cancel before proceeding.
+- [ ] Cancellation is always possible up until the point of irreversible submission, and the cancel control is equally prominent as confirm.
+
+---
+
+## 3. Error Recovery
+
+Errors should never leave the user stuck or force them to restart a flow from scratch.
+
+- [ ] Every error state displays a human-readable message explaining what went wrong (e.g., "Payment not found on-chain — the transaction hash may be incorrect."), not a raw error code.
+- [ ] Each error message includes a specific next step or action the user can take (e.g., "Check the transaction hash on Stellar Expert, then retry." or "Contact support with reference #XYZ.").
+- [ ] On error, form fields retain previously entered values so the user does not need to re-enter data.
+- [ ] Partial failures (e.g., one student in a bulk import failed) are clearly distinguished from full failures — the UI shows which records succeeded and which failed.
+- [ ] Network or timeout errors trigger a retry option, not just a generic failure screen.
+- [ ] Validation errors are shown inline, adjacent to the relevant field, not only at the top of the form.
+
+---
+
+## 4. Accessibility
+
+All users, including those relying on assistive technology, must be able to complete financial flows independently.
+
+- [ ] Every interactive element (button, input, link, toggle) has an accessible label — either visible text, `aria-label`, or `aria-labelledby`. Labels are verified with a screen reader or automated tool (e.g., axe, Lighthouse).
+- [ ] Status indicators (payment verified ✓, payment failed ✗, pending ⏳) use text or iconography in addition to color — color is never the sole differentiator.
+- [ ] Focus is managed correctly: after a modal opens, focus moves to the modal; after it closes, focus returns to the triggering element.
+- [ ] The entire flow is keyboard-navigable: all actions can be triggered with `Tab`, `Enter`, and `Escape` alone.
+- [ ] Dynamic content changes (payment status updates via SSE, inline validation messages) are announced to screen readers via `aria-live` regions.
+- [ ] Touch targets for mobile are at least 44×44 px.
+
+---
+
+## 5. Localization
+
+Monetary and temporal data must be rendered correctly for the user's locale and timezone.
+
+- [ ] Monetary amounts are formatted using the browser/user locale (e.g., `Intl.NumberFormat`) — decimal separators, thousands separators, and currency symbols are locale-correct.
+- [ ] Currency and asset codes are always shown alongside amounts (e.g., "250 XLM", "100.00 USDC") and are not reliant on page context alone.
+- [ ] All date and time values (payment timestamps, due dates, audit log entries) are displayed in the user's local timezone with the offset or timezone name shown.
+- [ ] Error and status messages are sourced from translatable strings — no hardcoded English copy in component logic.
+- [ ] Layouts do not break under RTL text direction; flex/grid directions and text alignment are logical, not physical, where they affect meaning.
+
+---
+
+## 6. Audit Expectations
+
+Every financial action must leave a verifiable, tamper-evident record.
+
+- [ ] The action generates an audit log entry in the backend `AuditLog` collection — confirmed by checking `backend/src/services/auditService.js` is called in the relevant controller/service.
+- [ ] The audit entry records the actor: authenticated user ID, role (admin/parent), and school tenant ID.
+- [ ] The audit entry records the full outcome — success with result details, or failure with error reason.
+- [ ] The audit entry includes a timestamp, resource type, resource ID, and the action performed.
+- [ ] Audit entries are immutable after creation — no update or delete path exists for audit records in the data model.
+- [ ] The UI for admins surfaces the audit trail for the affected record (student payment history, dispute log) so changes are visible without needing database access.
+
+---
+
+## 7. Security
+
+The UI must not expose data beyond what is necessary, and must enforce the correct authentication level.
+
+- [ ] The page/action is protected by the appropriate authentication guard — admin-only actions cannot be reached by parent-role sessions.
+- [ ] Sensitive operations (fee structure changes, admin creation, dispute resolution) are gated behind step-up authentication where required by the backend.
+- [ ] Wallet addresses and transaction hashes are truncated in display (e.g., `GABCD...WXYZ`) with a copy-to-clipboard affordance for the full value — they are never rendered in full in page text by default.
+- [ ] The UI does not expose other tenants' data — school IDs, wallet addresses, and student records are scoped to the authenticated school.
+- [ ] API responses are not forwarded verbatim to the UI if they contain fields beyond what the component needs (e.g., internal IDs, raw DB objects).
+- [ ] Error messages do not leak implementation details (stack traces, internal error codes, DB field names) to the end user.
+
+---
+
+## Examples
+
+### ✅ Acceptable: Payment Confirmation Dialog
+
+```
+┌─────────────────────────────────────────────┐
+│  Confirm Payment                            │
+│                                             │
+│  Student:      Jane Doe (STU-042)           │
+│  Amount:       250 XLM                      │
+│  Destination:  Greenwood Academy            │
+│                (GSCHOOL...3XYZ)             │
+│  Memo:         STU-042                      │
+│                                             │
+│  ⚠️  Blockchain payments are irreversible.  │
+│                                             │
+│  [ Cancel ]          [ Confirm Payment ]    │
+└─────────────────────────────────────────────┘
+```
+
+Key points: amount + asset, destination with truncated address, student ID, irreversibility warning, and equal-weight cancel/confirm controls.
+
+---
+
+### ✅ Acceptable: Inline Validation Error
+
+```
+Transaction Hash *
+[ abc123xyz...                        ]
+  ✖ Transaction not found on Stellar testnet.
+    Verify the hash at stellar.expert, then retry.
+```
+
+Key points: error adjacent to the field, message explains what's wrong, provides a next step.
+
+---
+
+### ❌ Unacceptable: Bare Confirmation
+
+```
+Are you sure?   [ OK ]
+```
+
+Missing: amount, asset, destination, consequence statement, and a meaningful cancel path.
+
+---
+
+### ❌ Unacceptable: Error without Action
+
+```
+Error: TX_FAILED
+```
+
+Missing: plain-language explanation, next step for the user.
+
+---
+
+## Tracking Findings
+
+When a checklist item cannot be checked off:
+
+1. **Do not merge** until the item is resolved or formally waived.
+2. **Open a GitHub issue** for each unchecked item using the label `ux-debt`:
+   - Title: `[UX] <Component>: <short description of the gap>` (e.g., `[UX] PaymentConfirmModal: wallet address shown in full`)
+   - Body: reference this checklist section, describe the observed behaviour, and the expected behaviour.
+   - Link the new issue in the PR description under a **"UX Findings"** heading.
+3. **Waivers**: if a finding is accepted as out-of-scope for this PR, add a comment in the PR with the issue number and the approving reviewer's sign-off. The linked issue must still be open and tracked.
+
+Example PR description entry:
+
+```
+## UX Findings
+- [ ] #234 — Wallet address displayed in full (Security §7, item 3)
+```
+
+---
+
+## Not Applicable Guidance
+
+Mark a section `N/A` only when **all** of the following are true. Include a one-line reason in the PR.
+
+| Section | Skip when… |
+|---|---|
+| **Clarity** | The PR contains no user-facing copy or UI changes. |
+| **Confirmation** | The action is fully reversible and has no monetary consequence (e.g., updating a display name). |
+| **Error Recovery** | The PR contains no form inputs or submission paths. |
+| **Accessibility** | The PR is backend-only with zero frontend changes. |
+| **Localization** | The PR contains no user-facing strings, amounts, or timestamps. |
+| **Audit Expectations** | The PR touches only read-only views with no state-changing actions. |
+| **Security** | The PR is a documentation or test-only change. |
+
+When in doubt, keep the section and check the boxes — it takes less time than a post-merge finding.

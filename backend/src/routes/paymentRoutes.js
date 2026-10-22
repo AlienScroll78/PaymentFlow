@@ -61,7 +61,7 @@ const {
 const { resolveSchool } = require('../middleware/schoolContext');
 const idempotencyMiddleware = require('../middleware/idempotency');
 const { auditContext } = require('../middleware/auditContext');
-const { strictLimiter, verifyLimiter } = require('../middleware/rateLimiter');
+const { strictLimiter, verifyLimiter, syncLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
