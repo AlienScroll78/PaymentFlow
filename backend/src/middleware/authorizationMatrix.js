@@ -209,6 +209,33 @@ const MATRIX = {
       { method: 'GET',  path: '/api/students/public/:studentId' },
     ],
   },
+
+  // ── Reconciliation admin ───────────────────────────────────────────────────
+  RECONCILIATION_ADMIN: {
+    description: 'Provider reconciliation jobs and discrepancy review',
+    authLevel: 'SUPER_ADMIN',
+    roles: ['admin', 'super_admin'],
+    crossSchool: true,
+    ownershipCheck: false,
+    endpoints: [
+      { method: 'POST',  path: '/api/admin/reconciliation/run' },
+      { method: 'GET',   path: '/api/admin/reconciliation' },
+      { method: 'PATCH', path: '/api/admin/reconciliation/:id' },
+    ],
+  },
+
+  // ── Analytics (school-scoped) ──────────────────────────────────────────────
+  ANALYTICS: {
+    description: 'Analytics and summary queries (school-scoped; owner or finance role)',
+    authLevel: 'SCHOOL_ADMIN',
+    roles: ['owner', 'finance'],
+    crossSchool: false,
+    ownershipCheck: false,
+    endpoints: [
+      { method: 'GET', path: '/api/analytics' },
+      { method: 'GET', path: '/api/analytics/summary' },
+    ],
+  },
 };
 
 /**
@@ -244,4 +271,52 @@ function endpointsForGroup(groupName) {
   return group.endpoints;
 }
 
-module.exports = { MATRIX, flattenMatrix, endpointsForGroup };
+/**
+ * Validate the matrix structure at startup or in tests.
+ * Throws if any group is missing required fields or any endpoint is malformed.
+ *
+ * @throws {Error} If the matrix is invalid.
+ * @returns {true} If the matrix is valid.
+ */
+function validateMatrix() {
+  const REQUIRED_GROUP_FIELDS = ['description', 'authLevel', 'roles', 'crossSchool', 'ownershipCheck', 'endpoints'];
+  const VALID_AUTH_LEVELS = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PUBLIC'];
+  const VALID_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+
+  for (const [groupName, group] of Object.entries(MATRIX)) {
+    for (const field of REQUIRED_GROUP_FIELDS) {
+      if (!(field in group)) {
+        throw new Error(`[AuthorizationMatrix] Group "${groupName}" is missing required field: ${field}`);
+      }
+    }
+    if (!VALID_AUTH_LEVELS.includes(group.authLevel)) {
+      throw new Error(
+        `[AuthorizationMatrix] Group "${groupName}" has invalid authLevel "${group.authLevel}". ` +
+        `Must be one of: ${VALID_AUTH_LEVELS.join(', ')}`
+      );
+    }
+    if (!Array.isArray(group.roles)) {
+      throw new Error(`[AuthorizationMatrix] Group "${groupName}" roles must be an array`);
+    }
+    if (!Array.isArray(group.endpoints) || group.endpoints.length === 0) {
+      throw new Error(`[AuthorizationMatrix] Group "${groupName}" must have at least one endpoint`);
+    }
+    for (const ep of group.endpoints) {
+      if (!ep.method || !ep.path) {
+        throw new Error(
+          `[AuthorizationMatrix] Group "${groupName}" has an endpoint missing method or path: ` +
+          JSON.stringify(ep)
+        );
+      }
+      if (!VALID_METHODS.includes(ep.method.toUpperCase())) {
+        throw new Error(
+          `[AuthorizationMatrix] Group "${groupName}" endpoint has invalid HTTP method "${ep.method}"`
+        );
+      }
+    }
+  }
+
+  return true;
+}
+
+module.exports = { MATRIX, flattenMatrix, endpointsForGroup, validateMatrix };
