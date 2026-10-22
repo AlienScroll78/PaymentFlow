@@ -8,6 +8,7 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 
 const EMPTY_FORM = { publicKey: "", label: "" };
 
@@ -192,7 +193,7 @@ export default function SourceValidationRules() {
                     </td>
                     <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                       {rule.lastMatchedAt
-                        ? new Date(rule.lastMatchedAt).toLocaleDateString(undefined, { dateStyle: "medium" })
+                        ? <TimestampDisplay iso={rule.lastMatchedAt} mode={DISPLAY_MODE.UTC} dateOnly />
                         : "Never"}
                     </td>
                     <td style={{ textAlign: "right" }}>
