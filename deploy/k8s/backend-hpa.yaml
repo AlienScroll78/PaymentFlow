@@ -26,6 +26,24 @@ spec:
     name: backend
   minReplicas: 2
   maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      selectPolicy: Min
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
   metrics:
     # CPU: scale out when average utilisation exceeds 70 % of the pod's CPU request.
     # Keeps headroom for payment-processing spikes without over-provisioning at idle.
