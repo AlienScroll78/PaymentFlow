@@ -35,7 +35,7 @@ const {
 } = require('../controllers/outboxAdminController');
 const { requireAdminAuth } = require('../middleware/auth');
 const { auditContext } = require('../middleware/auditContext');
-const { triggerRun, getDiscrepancies, reviewDiscrepancy } = require('../controllers/reconciliationAdminController');
+const { triggerRun, getDiscrepancies, reviewDiscrepancy, getPaymentReconciliationRuns } = require('../controllers/reconciliationAdminController');
 
 // POST /api/admin/log-level — change log level at runtime
 router.post('/log-level', requireAdminAuth, auditContext, setLogLevel);
@@ -79,6 +79,7 @@ router.get('/outbox/stats', requireAdminAuth, getOutboxStats);
 // Provider reconciliation job — Issue #33
 // Trigger a bounded, idempotent reconciliation run and inspect discrepancy records.
 router.post('/reconciliation/run',  requireAdminAuth, auditContext, triggerRun);
+router.get('/reconciliation/runs', requireAdminAuth, getPaymentReconciliationRuns);
 router.get('/reconciliation',       requireAdminAuth, getDiscrepancies);
 router.patch('/reconciliation/:id', requireAdminAuth, auditContext, reviewDiscrepancy);
 

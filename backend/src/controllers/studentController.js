@@ -251,6 +251,8 @@ async function deleteStudent(req, res, next) {
       return next(err);
     }
 
+    const before = student.toObject();
+
     // Perform soft delete — set deletedAt timestamp instead of removing the document
     await student.softDelete();
 
@@ -270,7 +272,9 @@ async function deleteStudent(req, res, next) {
       performedBy: req.auditContext?.performedBy ?? 'unknown',
       targetId: studentId,
       targetType: 'student',
-      details: { name: student.name, class: student.class, deletedAt: student.deletedAt },
+      details: { before, after: { studentId, deletedAt: student.deletedAt } },
+      before,
+      after: { studentId, deletedAt: student.deletedAt },
       result: 'success',
       ipAddress: req.auditContext?.ipAddress ?? null,
       userAgent: req.auditContext?.userAgent ?? null,
@@ -310,6 +314,7 @@ async function restoreStudent(req, res, next) {
       return next(err);
     }
 
+    const before = student.toObject();
     const previousDeletedAt = student.deletedAt;
 
     // Restore the student — clears deletedAt via the softDelete utility
@@ -330,7 +335,9 @@ async function restoreStudent(req, res, next) {
       performedBy: req.auditContext?.performedBy ?? 'unknown',
       targetId: studentId,
       targetType: 'student',
-      details: { name: student.name, class: student.class, previousDeletedAt },
+      details: { before, after: { studentId, deletedAt: null } },
+      before,
+      after: { studentId, deletedAt: null },
       result: 'success',
       ipAddress: req.auditContext?.ipAddress ?? null,
       userAgent: req.auditContext?.userAgent ?? null,

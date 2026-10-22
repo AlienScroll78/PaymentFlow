@@ -200,6 +200,18 @@ const stuckPaymentsGauge = new client.Gauge({
   },
 });
 
+const paymentReconciliationMismatchRate = new client.Gauge({
+  name: 'payment_reconciliation_mismatch_rate',
+  help: 'Mismatch rate of the most recent scheduled payment reconciliation run',
+  registers: [registry],
+});
+
+const paymentReconciliationMismatchThreshold = new client.Gauge({
+  name: 'payment_reconciliation_mismatch_threshold',
+  help: 'Configured payment reconciliation mismatch alert threshold',
+  registers: [registry],
+});
+
 // suspicious_payment_flagged{school_id} — counter of payments flagged as
 // suspicious by the abnormal-pattern detector, so operators can alert on
 // flagged volume per tenant. Incremented in the payment confirmation pipeline.
@@ -608,6 +620,8 @@ module.exports = {
   paymentBatchItemsTotal,
   paymentBatchDurationSeconds,
   stuckPaymentsGauge,
+  paymentReconciliationMismatchRate,
+  paymentReconciliationMismatchThreshold,
   paymentFunnelTotal,
   horizonRequestDurationSeconds,
   webhookDeliveryTotal,

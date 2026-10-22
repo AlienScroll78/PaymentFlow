@@ -17,7 +17,7 @@ const { initiateRefund, approveRefund, getRefundsByPayment, getRefundsBySchool }
 const { generateReconciliationReport } = require('../services/reconciliationService');
 const lock = require('../services/distributedLock');
 const { ADMIN_PAYMENT_STATUS_TRANSITIONS, PAYMENT_STATUS } = require('../constants/paymentStatus');
-const { transition: paymentTransition } = require('../services/paymentTransitionService');
+const { transition: paymentTransition, InvalidTransitionError } = require('../services/paymentTransitionService');
 
 // TTL for the per-school distributed sync lock (60 s — long enough to complete
 // a full blockchain sync while short enough to auto-expire after a crash).
@@ -303,14 +303,21 @@ async function applyStatusTransition({ req, txHash, newStatus, reason }) {
     return { ok: false, error: 'Payment not found', code: 'NOT_FOUND' };
   }
 
-  return paymentTransition(payment, newStatus, {
-    adminOverride: true,
-    reason,
-    performedBy:  req.auditContext?.performedBy || 'unknown',
-    schoolId:     req.schoolId,
-    ipAddress:    req.auditContext?.ipAddress,
-    userAgent:    req.auditContext?.userAgent,
-  });
+  try {
+    return await paymentTransition(payment, newStatus, {
+      adminOverride: true,
+      reason,
+      performedBy:  req.auditContext?.performedBy || 'unknown',
+      schoolId:     req.schoolId,
+      ipAddress:    req.auditContext?.ipAddress,
+      userAgent:    req.auditContext?.userAgent,
+    });
+  } catch (err) {
+    if (err instanceof InvalidTransitionError) {
+      return { ok: false, error: err.message, code: err.code };
+    }
+    throw err;
+  }
 }
 
 /**

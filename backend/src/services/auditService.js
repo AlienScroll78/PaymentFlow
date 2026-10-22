@@ -51,6 +51,7 @@ const CURSOR_HMAC_KEY =
 
 /** Cursors expire after 1 hour by default. */
 const CURSOR_TTL_MS = 60 * 60 * 1000;
+const SENSITIVE_AUDIT_KEY = /secret|password|token|private.?key|authorization/i;
 
 // In-process failure counter — reset on restart
 let _auditFailureCount = 0;
@@ -66,12 +67,23 @@ function _resetAuditFailureCount() {
   _auditFailureCount = 0;
 }
 
+function sanitizeAuditValue(value) {
+  if (value == null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(sanitizeAuditValue);
+  if (typeof value.toObject === 'function') return sanitizeAuditValue(value.toObject());
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    SENSITIVE_AUDIT_KEY.test(key) ? '[REDACTED]' : sanitizeAuditValue(nested),
+  ]));
+}
+
 /**
  * Compute a deterministic HMAC-SHA256 over the canonical fields of an entry.
  * prevHash is included so any modification to the chain is detectable.
  */
 function _computeEntryHash(fields) {
-  const canonical = JSON.stringify({
+  const canonicalFields = {
     schoolId:     fields.schoolId,
     action:       fields.action,
     performedBy:  fields.performedBy,
@@ -83,7 +95,10 @@ function _computeEntryHash(fields) {
     ipAddress:    fields.ipAddress ?? null,
     prevHash:     fields.prevHash ?? null,
     createdAt:    fields.createdAt instanceof Date ? fields.createdAt.toISOString() : fields.createdAt,
-  });
+  };
+  if (fields.before != null) canonicalFields.before = fields.before;
+  if (fields.after != null) canonicalFields.after = fields.after;
+  const canonical = JSON.stringify(canonicalFields);
   return crypto.createHmac('sha256', HMAC_KEY).update(canonical).digest('hex');
 }
 
@@ -91,12 +106,14 @@ function _computeEntryHash(fields) {
  * Fetch the most recent audit entry's entryHash for the given schoolId.
  * Used to link the new entry into the hash chain.
  */
-async function _getPrevHash(schoolId) {
-  const last = await AuditLog.findOne({ schoolId })
+async function _getPrevHash(schoolId, session = null) {
+  let query = AuditLog.findOne({ schoolId })
     .sort({ _id: -1 })
     .select('entryHash')
     .lean()
     .bypassTenantScope();
+  if (session) query = query.session(session);
+  const last = await query;
   return last ? (last.entryHash || null) : null;
 }
 
@@ -113,27 +130,36 @@ async function logAudit({
   targetType,
   details = {},
   result = 'success',
+  before = details?.before ?? null,
+  after = details?.after ?? (result === 'success' ? details : null),
   errorMessage = null,
   ipAddress = null,
   userAgent = null,
   severity = null,
+  session = null,
+  throwOnFailure = false,
 }) {
   try {
-    const prevHash = await _getPrevHash(schoolId);
+    details = sanitizeAuditValue(details);
+    before = sanitizeAuditValue(before);
+    after = sanitizeAuditValue(after);
+    const prevHash = await _getPrevHash(schoolId, session);
     const createdAt = new Date();
 
     const entryHash = _computeEntryHash({
       schoolId, action, performedBy, targetId, targetType,
-      details, result, errorMessage, ipAddress, prevHash, createdAt,
+      details, before, after, result, errorMessage, ipAddress, prevHash, createdAt,
     });
 
-    await AuditLog.create({
+    const entry = {
       schoolId,
       action,
       performedBy,
       targetId,
       targetType,
       details,
+      before,
+      after,
       result,
       errorMessage,
       ipAddress,
@@ -142,10 +168,16 @@ async function logAudit({
       prevHash,
       entryHash,
       createdAt,
-    });
+    };
+    if (session) {
+      await AuditLog.create([entry], { session });
+    } else {
+      await AuditLog.create(entry);
+    }
   } catch (err) {
     _auditFailureCount += 1;
     logger.error('AUDIT_LOG_FAILURE', { err, schoolId, action });
+    if (throwOnFailure) throw err;
   }
 }
 
@@ -383,6 +415,8 @@ async function verifyAuditChain(schoolId, { limit = 1000 } = {}) {
       targetId:     entry.targetId,
       targetType:   entry.targetType,
       details:      entry.details,
+      before:       entry.before,
+      after:        entry.after,
       result:       entry.result,
       errorMessage: entry.errorMessage,
       ipAddress:    entry.ipAddress,
