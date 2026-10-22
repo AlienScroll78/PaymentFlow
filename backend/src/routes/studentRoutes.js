@@ -21,7 +21,8 @@ const {
   adjustStudentCredit,
 } = require('../controllers/studentController');
 const { resubscribeReminders } = require('../controllers/reminderController');
-const { validateRegisterStudent, validateStudentIdParam } = require('../middleware/validate');
+const { getImportJobStatus } = require('../controllers/importJobController');
+const { validateRegisterStudent, validateStudentIdParam, validatePagination, validateUpdateStudent } = require('../middleware/validate');
 const { resolveSchool } = require('../middleware/schoolContext');
 const { requireAdminAuth, requireSchoolAuth } = require('../middleware/auth');
 const { auditContext } = require('../middleware/auditContext');
@@ -32,9 +33,13 @@ router.use(resolveSchool);
 
 // Admin-only routes
 router.post('/', requireAdminAuth, validateRegisterStudent, registerStudent);
-router.post('/bulk', requireAdminAuth, bulkImportLimiter, express.json({ limit: '1mb' }), streamingCsvUpload(), bulkImportStudents);
-router.get('/', requireAdminAuth, getAllStudents);
+router.post('/bulk', requireAdminAuth, bulkImportLimiter, express.json({ limit: '1mb' }), streamingCsvUpload({ requiredHeaders: ['studentId', 'name', 'class'] }), bulkImportStudents);
+router.get('/', requireAdminAuth, validatePagination, getAllStudents);
 router.get('/export', requireAdminAuth, exportStudents);
+
+// Import job status — registered BEFORE /:studentId so Express does not
+// capture the literal segment 'import' as a studentId parameter.
+router.get('/import/:jobId', requireAdminAuth, getImportJobStatus);
 
 // Authentication-required routes (Issue #1040: all student financial data requires auth)
 router.get('/summary', requireSchoolAuth(), getPaymentSummary);
@@ -43,7 +48,7 @@ router.get('/overdue', requireSchoolAuth(), getOverdueStudents);
 // Public routes
 router.get('/public/:studentId', validateStudentIdParam, getPublicStudentInfo);
 router.get('/:studentId', requireAdminAuth, validateStudentIdParam, getStudent);
-router.put('/:studentId', requireAdminAuth, validateStudentIdParam, auditContext, updateStudent);
+router.put('/:studentId', requireAdminAuth, validateStudentIdParam, validateUpdateStudent, auditContext, updateStudent);
 router.delete('/:studentId', requireAdminAuth, validateStudentIdParam, auditContext, deleteStudent);
 router.post('/:studentId/restore', requireAdminAuth, validateStudentIdParam, auditContext, restoreStudent);
 router.get('/:studentId/payments/audit', requireAdminAuth, validateStudentIdParam, getDeletedStudentPayments);

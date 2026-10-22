@@ -44,6 +44,9 @@ async function getAuditLogsEndpoint(req, res, next) {
 
     res.json(auditResult);
   } catch (err) {
+    if (err.code === 'INVALID_CURSOR') {
+      return res.status(400).json({ error: err.message, code: 'INVALID_CURSOR' });
+    }
     next(err);
   }
 }

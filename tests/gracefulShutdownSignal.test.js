@@ -2,6 +2,7 @@
 
 process.env.MONGO_URI = 'mongodb://localhost:27017/test';
 process.env.SCHOOL_WALLET_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+process.env.JWT_SECRET = 'test-jwt-secret-for-graceful-shutdown-tests-only';
 
 describe('SIGTERM graceful shutdown', () => {
   let mockServer;
@@ -132,6 +133,18 @@ describe('SIGTERM graceful shutdown', () => {
     jest.doMock('../backend/src/routes/feeAdjustmentRoutes', () => ({}));
     jest.doMock('../backend/src/routes/adminRoutes', () => ({}));
     jest.doMock('../backend/src/routes/authRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/emailDeliveryRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/emailProviderWebhookRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/webhookEndpointRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/webhookDeliveryRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/emailRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/paymentPlanRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/auditRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/notificationRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/analyticsRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/superAdminRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/cspReportRoutes', () => ({}));
+    jest.doMock('../backend/src/routes/metricsRoute', () => ({}));
 
     jest.doMock('../backend/src/utils/logger', () => {
       const log = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
