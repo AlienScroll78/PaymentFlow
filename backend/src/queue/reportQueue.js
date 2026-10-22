@@ -6,6 +6,7 @@ const { ReportJob, REPORT_STATUSES } = require('../models/reportJobModel');
 const logger = require('../utils/logger');
 const { randomUUID } = require('crypto');
 const sseService = require('../services/sseService');
+const paymentEvents = require('../events/paymentEvents');
 
 const QUEUE_NAME = 'report-generation';
 const REPORT_JOB_TTL_MS = parseInt(process.env.REPORT_JOB_TTL_MS || String(6 * 60 * 60 * 1000), 10);
@@ -135,6 +136,19 @@ async function setJobCompleted(jobId, result) {
     } catch (err) {
       // SSE delivery is best-effort; do not fail the job on SSE errors.
       logger.warn('[ReportQueue] SSE emit failed after job completion', { jobId, error: err.message });
+    }
+
+    // Issue #362 — emit report.ready on the event bus so the notification
+    // subscriber creates an in-app notification for the school.
+    try {
+      paymentEvents.emit('report.ready', {
+        schoolId: updated.schoolId,
+        jobId: updated.jobId,
+        reportType: updated.type,
+        downloadUrl: `/api/reports/jobs/${updated.jobId}/download`,
+      });
+    } catch (err) {
+      logger.warn('[ReportQueue] report.ready event emit failed', { jobId, error: err.message });
     }
   }
 }
