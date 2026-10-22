@@ -7,6 +7,7 @@ const REPORT_STATUSES = {
   PROCESSING: 'processing',
   COMPLETED: 'completed',
   FAILED: 'failed',
+  EXPIRED: 'expired',
 };
 
 const reportJobSchema = new mongoose.Schema(
