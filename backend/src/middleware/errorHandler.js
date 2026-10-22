@@ -44,6 +44,16 @@ function globalErrorHandler(err, req, res, next) {
     requestId: req.requestId,
     schoolId: req.schoolId,
   };
+  if (err?.type === 'entity.too.large') {
+    logger.warn('Request body exceeded the configured size limit', {
+      ...logCtx,
+      contentLength: req.headers['content-length'],
+    });
+    return res.status(413).json({
+      errors: [{ field: 'body', message: 'Request body must not exceed 50KB' }],
+      code: 'PAYLOAD_TOO_LARGE',
+    });
+  }
   statusCode >= 500 ? logger.error('Server error', logCtx) : logger.warn('Client error', logCtx);
 
   if (process.env.NODE_ENV === 'development' && err.stack) {

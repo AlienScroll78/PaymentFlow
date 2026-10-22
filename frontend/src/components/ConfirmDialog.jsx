@@ -1,468 +1,472 @@
 /**
- * ConfirmDialog — Issue #108
+ * ConfirmDialog — Issue #356
  *
- * A reusable, context-aware confirmation dialog for destructive actions
- * (refunds, cancellations, role changes, overrides, deletions).
+ * Tiered confirmation dialog system for destructive actions.
  *
- * Design principles
- * -----------------
- * 1. Names the target — always displays what will be affected.
- * 2. States the consequence — one-sentence impact summary.
- * 3. Prevents accidental Enter — the confirm button is NOT the default focus;
- *    the cancel button receives focus on mount so pressing Enter dismisses
- *    rather than confirms.
- * 4. Requires deliberate interaction — the confirm button for the most
- *    dangerous variant (variant="danger") requires the user to TYPE the
- *    target name before the button becomes active.
- * 5. Handles pending/failure states — shows a spinner while submitting and
- *    surfaces errors inline without closing the dialog.
- * 6. Predictable focus return — when the dialog closes, focus returns to the
- *    element that triggered it (caller passes `triggerRef` or the component
- *    captures `document.activeElement` on mount).
+ * Tiers:
+ *  LOW      — standard confirm/cancel dialog. Backdrop click closes.
+ *  HIGH     — user must type a specific phrase to enable the confirm button.
+ *             Backdrop click disabled.
+ *  CRITICAL — requires admin password re-entry before proceeding.
+ *             Backdrop click disabled. Escape key disabled.
  *
- * Props
- * -----
- * isOpen          boolean           Whether the dialog is visible.
- * onConfirm       () => Promise     Async callback; dialog stays open until it resolves/rejects.
- * onCancel        () => void        Called when the user dismisses without confirming.
- * title           string            Dialog heading (e.g. "Delete fee structure?").
- * description     string|ReactNode  Impact summary (e.g. "This will remove Class A for 12 students.").
- * confirmLabel    string?           Label for the confirm button (default: "Confirm").
- * cancelLabel     string?           Label for the cancel button (default: "Cancel").
- * variant         "danger"|"warning"|"info"  Controls colour scheme (default: "danger").
- * requireTyping   string?           When set the user must type this exact string to enable confirm.
- * error           string?           External error message to display (e.g. from a parent component).
+ * Usage:
+ *  <ConfirmDialog
+ *    open={showDialog}
+ *    tier="HIGH"
+ *    title="Void Payment"
+ *    description="This will permanently void the payment and cannot be undone."
+ *    confirmPhrase="void payment"   // required for HIGH tier
+ *    confirmLabel="Void Payment"
+ *    onConfirm={handleVoid}
+ *    onCancel={() => setShowDialog(false)}
+ *  />
  *
- * Example
- * -------
- *   <ConfirmDialog
- *     isOpen={showDeleteDialog}
- *     title={t("fees.deleteTitle")}
- *     description={`You are about to delete ${fee.className}. This cannot be undone.`}
- *     confirmLabel={t("actions.delete")}
- *     variant="danger"
- *     requireTyping={fee.className}
- *     onConfirm={handleDelete}
- *     onCancel={() => setShowDeleteDialog(false)}
- *   />
+ *  For CRITICAL tier, onConfirm receives the entered password:
+ *    onConfirm={(password) => submitWithPassword(password)}
  */
 
-import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { IconAlertTriangle, IconCheck } from "./Icons";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { IconAlertTriangle, IconX, IconShield, IconCheck } from "./Icons";
 
-// ── Variant config ────────────────────────────────────────────────────────────
+export const CONFIRM_TIER = Object.freeze({
+  LOW:      "LOW",
+  HIGH:     "HIGH",
+  CRITICAL: "CRITICAL",
+});
 
-const VARIANT_CONFIG = {
-  danger: {
-    headerBg:    "var(--danger-bg)",
-    headerColor: "var(--danger-text)",
-    btnClass:    "btn-danger",
-    iconColor:   "var(--danger)",
-    borderColor: "var(--danger-border)",
+// Tier metadata
+const TIER_META = {
+  [CONFIRM_TIER.LOW]: {
+    headerBg:     "var(--bg-subtle)",
+    headerBorder: "var(--border)",
+    iconBg:       "var(--info-bg)",
+    iconColor:    "var(--info-text)",
+    Icon:         IconAlertTriangle,
+    backdropClose: true,
+    escapeClose:   true,
   },
-  warning: {
-    headerBg:    "var(--warning-bg)",
-    headerColor: "var(--warning-text)",
-    btnClass:    "btn-warning",
-    iconColor:   "var(--warning)",
-    borderColor: "var(--warning-border)",
+  [CONFIRM_TIER.HIGH]: {
+    headerBg:     "var(--warning-bg)",
+    headerBorder: "var(--warning-border)",
+    iconBg:       "var(--warning-bg)",
+    iconColor:    "var(--warning-text)",
+    Icon:         IconAlertTriangle,
+    backdropClose: false,
+    escapeClose:   true,
   },
-  info: {
-    headerBg:    "var(--info-bg)",
-    headerColor: "var(--info-text)",
-    btnClass:    "btn-primary",
-    iconColor:   "var(--info)",
-    borderColor: "var(--info-border)",
+  [CONFIRM_TIER.CRITICAL]: {
+    headerBg:     "var(--danger-bg)",
+    headerBorder: "var(--danger-border)",
+    iconBg:       "var(--danger-bg)",
+    iconColor:    "var(--danger-text)",
+    Icon:         IconShield,
+    backdropClose: false,
+    escapeClose:   false,
   },
 };
 
-function getVariantConfig(variant) {
-  return VARIANT_CONFIG[variant] || VARIANT_CONFIG.danger;
-}
-
-// ── Component ────────────────────────────────────────────────────────────────
-
-/**
- * @param {{
- *   isOpen: boolean,
- *   onConfirm: () => Promise<void>,
- *   onCancel: () => void,
- *   title: string,
- *   description: string | import("react").ReactNode,
- *   confirmLabel?: string,
- *   cancelLabel?: string,
- *   variant?: "danger" | "warning" | "info",
- *   requireTyping?: string,
- *   error?: string,
- * }} props
- */
 export default function ConfirmDialog({
-  isOpen,
-  onConfirm,
-  onCancel,
+  open = false,
+  tier = CONFIRM_TIER.LOW,
   title,
   description,
-  confirmLabel,
-  cancelLabel,
-  variant = "danger",
-  requireTyping,
-  error: externalError,
+  confirmPhrase,    // Required for HIGH tier — user must type this exactly
+  confirmLabel = "Confirm",
+  cancelLabel  = "Cancel",
+  onConfirm,
+  onCancel,
+  loading = false,
 }) {
-  const { t } = useTranslation();
-  const dialogRef   = useRef(null);
-  const cancelRef   = useRef(null);
-  const triggerRef  = useRef(null); // captures the element that had focus before open
+  const [typed, setTyped]       = useState("");
+  const [password, setPassword] = useState("");
+  const [pwError, setPwError]   = useState(null);
+  const dialogRef               = useRef(null);
+  const inputRef                = useRef(null);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [internalError, setInternalError] = useState(null);
-  const [typedValue, setTypedValue] = useState("");
+  const meta = TIER_META[tier] || TIER_META[CONFIRM_TIER.LOW];
 
-  const cfg = getVariantConfig(variant);
-  const resolvedConfirmLabel = confirmLabel || t("actions.confirm");
-  const resolvedCancelLabel  = cancelLabel  || t("actions.cancel");
-  const errorMessage = internalError || externalError;
-
-  // Typing guard — confirm only enabled when typed value matches target.
-  const typingRequired = Boolean(requireTyping);
-  const typingMatch    = typedValue === requireTyping;
-  const confirmEnabled = !submitting && (!typingRequired || typingMatch);
-
-  // On open: capture trigger, focus cancel button, reset state.
+  // Reset state when dialog opens/closes
   useEffect(() => {
-    if (isOpen) {
-      triggerRef.current = document.activeElement;
-      setInternalError(null);
-      setTypedValue("");
-      // Small rAF so the dialog has rendered before focusing.
-      requestAnimationFrame(() => cancelRef.current?.focus());
-    } else {
-      // On close: restore focus to the element that triggered the dialog.
-      triggerRef.current?.focus();
+    if (open) {
+      setTyped("");
+      setPassword("");
+      setPwError(null);
+      // Focus the type-to-confirm input or dialog itself when it opens
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [isOpen]);
+  }, [open]);
 
-  // Escape closes the dialog (unless submission is in progress).
-  useEffect(() => {
-    if (!isOpen) return;
-    function onKey(e) {
-      if (e.key === "Escape" && !submitting) onCancel?.();
+  // Keyboard handler
+  const handleKeyDown = useCallback((e) => {
+    if (!open) return;
+    if (e.key === "Escape" && meta.escapeClose) {
+      onCancel?.();
     }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, submitting, onCancel]);
-
-  // Focus trap within the dialog.
-  useEffect(() => {
-    if (!isOpen) return;
-    const el = dialogRef.current;
-    if (!el) return;
-    function trapFocus(e) {
-      if (e.key !== "Tab") return;
-      const focusable = el.querySelectorAll(
-        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    // Trap focus inside dialog
+    if (e.key === "Tab" && dialogRef.current) {
+      const focusable = dialogRef.current.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       );
-      if (focusable.length === 0) { e.preventDefault(); return; }
       const first = focusable[0];
       const last  = focusable[focusable.length - 1];
-      if (e.shiftKey) {
-        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
-      } else {
-        if (document.activeElement === last)  { e.preventDefault(); first.focus(); }
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
       }
     }
-    el.addEventListener("keydown", trapFocus);
-    return () => el.removeEventListener("keydown", trapFocus);
-  }, [isOpen]);
+  }, [open, meta.escapeClose, onCancel]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
-  async function handleConfirm() {
-    if (!confirmEnabled) return;
-    setInternalError(null);
-    setSubmitting(true);
-    try {
-      await onConfirm?.();
-    } catch (err) {
-      setInternalError(
-        err?.message || t("errors.INTERNAL_ERROR")
-      );
-    } finally {
-      setSubmitting(false);
+  // Lock body scroll when open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  if (!open) return null;
+
+  // Determine whether confirm button is enabled
+  const phraseMatch = tier === CONFIRM_TIER.HIGH
+    ? typed.trim().toLowerCase() === (confirmPhrase || "").toLowerCase()
+    : true;
+  const passwordFilled = tier === CONFIRM_TIER.CRITICAL
+    ? password.trim().length > 0
+    : true;
+  const canConfirm = phraseMatch && passwordFilled && !loading;
+
+  function handleConfirm() {
+    if (!canConfirm) return;
+    setPwError(null);
+    if (tier === CONFIRM_TIER.CRITICAL) {
+      onConfirm?.(password);
+    } else {
+      onConfirm?.();
     }
   }
+
+  function handleBackdropClick(e) {
+    if (e.target === e.currentTarget && meta.backdropClose) {
+      onCancel?.();
+    }
+  }
+
+  const TierIcon = meta.Icon;
 
   return (
     <>
       <style>{`
-        .cdlg-overlay {
+        .confirm-backdrop {
           position: fixed;
           inset: 0;
-          background: rgba(10, 15, 30, 0.55);
-          backdrop-filter: blur(3px);
-          z-index: 450;
+          background: rgba(0, 0, 0, 0.55);
+          backdrop-filter: blur(2px);
+          z-index: 9999;
           display: flex;
           align-items: center;
           justify-content: center;
           padding: 1rem;
+          animation: confirmFadeIn 0.15s ease both;
         }
-        .cdlg-dialog {
+        @keyframes confirmFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .confirm-dialog {
           background: var(--card-bg);
           border: 1px solid var(--border);
-          border-radius: var(--radius-md);
+          border-radius: var(--radius-lg);
           box-shadow: var(--shadow-lg);
           width: 100%;
           max-width: 440px;
-          animation: cdlgIn 0.18s ease both;
-          display: flex;
-          flex-direction: column;
+          overflow: hidden;
+          animation: confirmSlideUp 0.18s ease both;
         }
-        @keyframes cdlgIn {
-          from { opacity: 0; transform: scale(0.96) translateY(-6px); }
-          to   { opacity: 1; transform: scale(1)    translateY(0); }
+        @keyframes confirmSlideUp {
+          from { opacity: 0; transform: translateY(16px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .cdlg-header {
+        .confirm-header {
+          padding: 1.25rem 1.25rem 1rem;
+          border-bottom: 1px solid var(--border);
           display: flex;
           align-items: flex-start;
-          gap: 0.75rem;
-          padding: 1.125rem 1.25rem 1rem;
-          border-radius: var(--radius-md) var(--radius-md) 0 0;
+          gap: 0.875rem;
         }
-        .cdlg-icon-wrap {
+        .confirm-icon-wrap {
+          width: 38px;
+          height: 38px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
           flex-shrink: 0;
-          margin-top: 1px;
         }
-        .cdlg-title {
-          margin: 0;
+        .confirm-title {
           font-size: 1rem;
           font-weight: 700;
           color: var(--text);
-          line-height: 1.3;
-          flex: 1;
+          line-height: 1.2;
+          margin-bottom: 0.25rem;
         }
-        .cdlg-body {
-          padding: 0 1.25rem 1rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.875rem;
-        }
-        .cdlg-description {
-          font-size: 0.875rem;
-          color: var(--text);
-          line-height: 1.55;
-          margin: 0;
-        }
-        .cdlg-error {
-          padding: 0.5rem 0.75rem;
-          background: var(--danger-bg);
-          color: var(--danger-text);
-          border: 1px solid var(--danger-border);
-          border-radius: var(--radius-sm);
-          font-size: 0.8125rem;
-          display: flex;
-          align-items: flex-start;
-          gap: 0.5rem;
-        }
-        .cdlg-typing-wrap {
-          display: flex;
-          flex-direction: column;
-          gap: 0.4rem;
-        }
-        .cdlg-typing-label {
-          font-size: 0.75rem;
+        .confirm-desc {
+          font-size: 0.8375rem;
           color: var(--text-muted);
-          line-height: 1.45;
+          line-height: 1.5;
         }
-        .cdlg-typing-label strong {
-          font-family: monospace;
-          font-size: 0.85rem;
-          color: var(--text);
-          background: var(--bg-subtle);
-          padding: 0.05rem 0.3rem;
-          border-radius: 3px;
-          border: 1px solid var(--border);
+        .confirm-body {
+          padding: 1rem 1.25rem;
         }
-        .cdlg-typing-input {
+        .confirm-tier-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          padding: 0.2rem 0.5rem;
+          border-radius: 6px;
+          font-size: 0.7rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 0.875rem;
+        }
+        .confirm-phrase-input,
+        .confirm-password-input {
           width: 100%;
-          padding: 0.45rem 0.7rem;
+          padding: 0.5rem 0.75rem;
           border: 1.5px solid var(--border);
           border-radius: var(--radius-sm);
-          font-family: monospace;
-          font-size: 0.875rem;
+          background: var(--bg);
           color: var(--text);
-          background: var(--card-bg);
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
+          font-size: 0.875rem;
+          font-family: monospace;
           box-sizing: border-box;
+          transition: border-color 0.15s, box-shadow 0.15s;
+          outline: none;
         }
-        .cdlg-typing-input:focus {
+        .confirm-phrase-input:focus,
+        .confirm-password-input:focus {
           border-color: var(--accent);
           box-shadow: 0 0 0 3px var(--accent-subtle);
         }
-        .cdlg-typing-input.match {
+        .confirm-phrase-input.match {
           border-color: var(--success);
-          box-shadow: 0 0 0 3px rgba(16,185,129,0.15);
+          box-shadow: 0 0 0 3px var(--success-bg);
         }
-        .cdlg-footer {
-          display: flex;
-          gap: 0.625rem;
-          justify-content: flex-end;
+        .confirm-footer {
           padding: 0.875rem 1.25rem;
           border-top: 1px solid var(--border);
-          background: var(--bg-subtle, var(--bg));
-          border-radius: 0 0 var(--radius-md) var(--radius-md);
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.625rem;
         }
-        /* Spinner */
-        @keyframes cdlgSpin { to { transform: rotate(360deg); } }
-        .cdlg-spinner {
-          display: inline-block;
-          width: 13px; height: 13px;
-          border: 2px solid rgba(255,255,255,0.3);
-          border-top-color: #fff;
-          border-radius: 50%;
-          animation: cdlgSpin 0.6s linear infinite;
-          margin-right: 0.35rem;
-          vertical-align: middle;
+        .confirm-btn-cancel {
+          padding: 0.5rem 1rem;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          background: var(--bg);
+          color: var(--text);
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          font-family: inherit;
+          transition: background 0.12s, border-color 0.12s;
         }
-        /* Ensure danger button style exists even if globals don't define it */
-        .btn-danger {
-          background: var(--danger, #f43f5e);
-          color: #fff;
+        .confirm-btn-cancel:hover {
+          background: var(--bg-subtle);
+          border-color: var(--border-strong);
+        }
+        .confirm-btn-confirm {
+          padding: 0.5rem 1.125rem;
           border: none;
+          border-radius: var(--radius-sm);
+          font-size: 0.875rem;
+          font-weight: 700;
+          cursor: pointer;
+          font-family: inherit;
+          transition: opacity 0.12s, filter 0.12s;
         }
-        .btn-danger:hover:not(:disabled) {
-          filter: brightness(0.92);
-        }
-        .btn-danger:disabled {
+        .confirm-btn-confirm:disabled {
           opacity: 0.45;
           cursor: not-allowed;
         }
-        .btn-warning {
-          background: var(--warning, #f59e0b);
-          color: #fff;
-          border: none;
-        }
-        .btn-warning:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
+        .confirm-btn-confirm:not(:disabled):hover {
+          filter: brightness(1.1);
         }
       `}</style>
 
       {/* Backdrop */}
       <div
-        className="cdlg-overlay"
-        onClick={e => { if (e.target === e.currentTarget && !submitting) onCancel?.(); }}
-        aria-hidden="true"
-      />
-
-      {/* Dialog */}
-      <div
-        className="cdlg-overlay"
-        style={{ pointerEvents: "none" }}
+        className="confirm-backdrop"
+        onClick={handleBackdropClick}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby="confirm-dialog-desc"
       >
-        <div
-          ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="cdlg-title"
-          aria-describedby="cdlg-description"
-          className="cdlg-dialog"
-          style={{ pointerEvents: "auto" }}
-        >
+        <div className="confirm-dialog" ref={dialogRef}>
+
           {/* Header */}
-          <div
-            className="cdlg-header"
-            style={{ borderBottom: `2px solid ${cfg.borderColor}` }}
-          >
+          <div className="confirm-header" style={{ background: meta.headerBg, borderBottomColor: meta.headerBorder }}>
             <div
-              className="cdlg-icon-wrap"
-              style={{ background: cfg.headerBg }}
-              aria-hidden="true"
+              className="confirm-icon-wrap"
+              style={{ background: meta.iconBg }}
             >
-              <IconAlertTriangle size={18} style={{ color: cfg.iconColor }} />
+              <TierIcon size={18} style={{ color: meta.iconColor }} />
             </div>
-            <h2 id="cdlg-title" className="cdlg-title">{title}</h2>
+            <div>
+              <div id="confirm-dialog-title" className="confirm-title">
+                {title}
+              </div>
+              <div id="confirm-dialog-desc" className="confirm-desc">
+                {description}
+              </div>
+            </div>
           </div>
 
           {/* Body */}
-          <div className="cdlg-body" id="cdlg-description">
-            <p className="cdlg-description">{description}</p>
-
-            {/* Inline error */}
-            {errorMessage && (
-              <div className="cdlg-error" role="alert" aria-live="assertive">
-                <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>{errorMessage}</span>
+          <div className="confirm-body">
+            {/* Tier badge */}
+            {(tier === CONFIRM_TIER.HIGH || tier === CONFIRM_TIER.CRITICAL) && (
+              <div
+                className="confirm-tier-badge"
+                style={{
+                  background: tier === CONFIRM_TIER.CRITICAL ? "var(--danger-bg)" : "var(--warning-bg)",
+                  color:      tier === CONFIRM_TIER.CRITICAL ? "var(--danger-text)" : "var(--warning-text)",
+                  border:     `1px solid ${tier === CONFIRM_TIER.CRITICAL ? "var(--danger-border)" : "var(--warning-border)"}`,
+                }}
+              >
+                <TierIcon size={10} />
+                {tier === CONFIRM_TIER.CRITICAL ? "Critical action" : "Destructive action"}
               </div>
             )}
 
-            {/* Typing confirmation guard */}
-            {typingRequired && (
-              <div className="cdlg-typing-wrap">
+            {/* HIGH tier: type-to-confirm */}
+            {tier === CONFIRM_TIER.HIGH && confirmPhrase && (
+              <div>
                 <label
-                  htmlFor="cdlg-typing-input"
-                  className="cdlg-typing-label"
+                  htmlFor="confirm-type-input"
+                  style={{
+                    display: "block",
+                    fontSize: "0.8125rem",
+                    color: "var(--text-muted)",
+                    marginBottom: "0.5rem",
+                    lineHeight: 1.4,
+                  }}
                 >
-                  {t("confirmDialog.typeToConfirm")}{" "}
-                  <strong>{requireTyping}</strong>{" "}
-                  {t("confirmDialog.typeToConfirmSuffix")}
+                  Type <strong style={{ color: "var(--text)", fontFamily: "monospace" }}>{confirmPhrase}</strong> to confirm:
                 </label>
                 <input
-                  id="cdlg-typing-input"
+                  id="confirm-type-input"
+                  ref={inputRef}
                   type="text"
-                  value={typedValue}
-                  onChange={e => setTypedValue(e.target.value)}
-                  className={`cdlg-typing-input${typingMatch ? " match" : ""}`}
-                  placeholder={requireTyping}
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && canConfirm) handleConfirm(); }}
+                  placeholder={confirmPhrase}
                   autoComplete="off"
-                  spellCheck="false"
-                  aria-describedby="cdlg-typing-hint"
-                  disabled={submitting}
+                  spellCheck={false}
+                  aria-label={`Type "${confirmPhrase}" to confirm`}
+                  className={`confirm-phrase-input${phraseMatch && typed.length > 0 ? " match" : ""}`}
                 />
-                {typingMatch && (
-                  <span
-                    id="cdlg-typing-hint"
-                    style={{ fontSize: "0.72rem", color: "var(--success)", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                {typed.length > 0 && !phraseMatch && (
+                  <div style={{ marginTop: "0.375rem", fontSize: "0.75rem", color: "var(--danger-text)" }}>
+                    Text does not match — type exactly: <em>{confirmPhrase}</em>
+                  </div>
+                )}
+                {phraseMatch && typed.length > 0 && (
+                  <div style={{ marginTop: "0.375rem", fontSize: "0.75rem", color: "var(--success-text)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                    <IconCheck size={12} /> Phrase confirmed
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* CRITICAL tier: password re-entry */}
+            {tier === CONFIRM_TIER.CRITICAL && (
+              <div>
+                <label
+                  htmlFor="confirm-password-input"
+                  style={{
+                    display: "block",
+                    fontSize: "0.8125rem",
+                    color: "var(--text-muted)",
+                    marginBottom: "0.5rem",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Enter your admin password to proceed:
+                </label>
+                <input
+                  id="confirm-password-input"
+                  ref={inputRef}
+                  type="password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setPwError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && canConfirm) handleConfirm(); }}
+                  placeholder="Your password"
+                  autoComplete="current-password"
+                  aria-label="Admin password for re-authentication"
+                  className="confirm-password-input"
+                  aria-invalid={pwError ? "true" : undefined}
+                  aria-describedby={pwError ? "confirm-pw-error" : undefined}
+                />
+                {pwError && (
+                  <div
+                    id="confirm-pw-error"
+                    role="alert"
+                    style={{ marginTop: "0.375rem", fontSize: "0.75rem", color: "var(--danger-text)", display: "flex", alignItems: "center", gap: "0.25rem" }}
                   >
-                    <IconCheck size={11} />
-                    {t("confirmDialog.typingMatched")}
-                  </span>
+                    <IconAlertTriangle size={11} /> {pwError}
+                  </div>
                 )}
               </div>
             )}
           </div>
 
           {/* Footer */}
-          <div className="cdlg-footer">
-            <button
-              ref={cancelRef}
-              type="button"
-              className="btn btn-ghost"
-              onClick={onCancel}
-              disabled={submitting}
-              aria-label={resolvedCancelLabel}
-            >
-              {resolvedCancelLabel}
-            </button>
+          <div className="confirm-footer">
+            {/* Cancel — always available on LOW/HIGH, available on CRITICAL except when loading */}
+            {(tier !== CONFIRM_TIER.CRITICAL || !loading) && (
+              <button
+                type="button"
+                className="confirm-btn-cancel"
+                onClick={onCancel}
+                disabled={loading}
+              >
+                {cancelLabel}
+              </button>
+            )}
 
             <button
               type="button"
-              className={`btn ${cfg.btnClass}`}
+              className="confirm-btn-confirm"
               onClick={handleConfirm}
-              disabled={!confirmEnabled}
-              aria-label={submitting ? t("actions.loading") : resolvedConfirmLabel}
-              aria-busy={submitting}
+              disabled={!canConfirm}
+              aria-disabled={!canConfirm}
+              style={{
+                background: tier === CONFIRM_TIER.CRITICAL
+                  ? "var(--danger)"
+                  : tier === CONFIRM_TIER.HIGH
+                  ? "var(--warning)"
+                  : "var(--accent)",
+                color: "#fff",
+              }}
             >
-              {submitting && <span className="cdlg-spinner" aria-hidden="true" />}
-              {submitting ? t("actions.loading") : resolvedConfirmLabel}
+              {loading ? "Processing…" : confirmLabel}
             </button>
           </div>
+
         </div>
       </div>
     </>

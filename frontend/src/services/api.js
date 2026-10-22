@@ -115,10 +115,15 @@ export const getPaymentSummary = ({ signal } = {}) => api.get("/payments/summary
 export const getPaymentInstructions = (studentId, { signal } = {}) => api.get(`/payments/instructions/${studentId}`, { signal });
 export const getStudentPayments = (studentId, { signal } = {}) => api.get(`/payments/${studentId}`, { signal });
 export const getStudentBalance  = (studentId, { signal } = {}) => api.get(`/payments/balance/${studentId}`, { signal });
-export const verifyPayment = (txHash) => api.post("/payments/verify", { txHash });
+export const verifyPayment = (txHash, idempotencyKey) =>
+  api.post(
+    "/payments/verify",
+    { txHash },
+    idempotencyKey ? { headers: { "X-Idempotency-Key": idempotencyKey } } : {}
+  );
 export const syncPayments = () => api.post("/payments/sync");
 export const getSyncStatus = ({ signal } = {}) => api.get("/payments/sync/status", { signal });
-export const getFeeStructures = () => api.get("/fees");
+export const getFeeStructures = ({ signal } = {}) => api.get("/fees", { signal });
 export const createFeeStructure = (data) => api.post("/fees", data);
 export const getFeeByClass = (className) => api.get(`/fees/${className}`);
 export const deleteFeeStructure = (className) => api.delete(`/fees/${encodeURIComponent(className)}`);
@@ -136,7 +141,7 @@ export const getConversionRates = () => api.get("/payments/rates");
 
 // Disputes
 export const flagDispute = (data) => api.post("/disputes", data);
-export const getDisputes = (params = {}) => api.get("/disputes", { params });
+export const getDisputes = (params = {}, { signal } = {}) => api.get("/disputes", { params, signal });
 export const getDisputeById = (id) => api.get(`/disputes/${id}`);
 export const resolveDispute = (id, data) =>
   api.patch(`/disputes/${id}/resolve`, data);
@@ -145,17 +150,17 @@ export const resolveDispute = (id, data) =>
 export const initiateRefund = (txHash, data) => api.post(`/payments/${txHash}/refund`, data);
 export const approveRefund = (refundId, data) => api.post(`/payments/refunds/${refundId}/approve`, data);
 export const getPaymentRefunds = (txHash) => api.get(`/payments/${txHash}/refunds`);
-export const getSchoolRefunds = (params = {}) => api.get("/payments/refunds/school/list", { params });
+export const getSchoolRefunds = (params = {}, { signal } = {}) => api.get("/payments/refunds/school/list", { params, signal });
 
 // Audit logs
 export const getRecentAuditLogs = (limit = 10) =>
   api.get("/audit-logs/recent", { params: { limit } });
-export const getAuditLogs = (params = {}) =>
-  api.get("/audit-logs", { params });
+export const getAuditLogs = (params = {}, { signal } = {}) =>
+  api.get("/audit-logs", { params, signal });
 
 // Fee adjustment rules
-export const getFeeAdjustmentRules = (schoolId) =>
-  api.get("/fee-adjustments", { headers: { "X-School-ID": schoolId } });
+export const getFeeAdjustmentRules = (schoolId, { signal } = {}) =>
+  api.get("/fee-adjustments", { headers: { "X-School-ID": schoolId }, signal });
 export const createFeeAdjustmentRule = (data, schoolId) =>
   api.post("/fee-adjustments", data, { headers: { "X-School-ID": schoolId } });
 export const updateFeeAdjustmentRule = (id, data, schoolId) =>
@@ -170,8 +175,8 @@ export const updateSchool = (slug, data) => api.patch(`/schools/${slug}`, data);
 // Payment plans
 export const createPaymentPlan = (studentId, data) =>
   api.post(`/payment-plans/${studentId}`, data);
-export const getPaymentPlan = (studentId) =>
-  api.get(`/payment-plans/${studentId}`);
+export const getPaymentPlan = (studentId, { signal } = {}) =>
+  api.get(`/payment-plans/${studentId}`, { signal });
 export const updateInstallment = (studentId, installmentIndex, data) =>
   api.patch(`/payment-plans/${studentId}/installment/${installmentIndex}`, data);
 export const cancelPaymentPlan = (studentId) =>
@@ -183,3 +188,15 @@ export const verifyUserMfa       = (data)   => api.post("/auth/mfa/verify", data
 export const disableUserMfa      = ()       => api.post("/auth/mfa/disable");
 export const getMfaBackupCodes   = ()       => api.get("/auth/mfa/backup-codes");
 export const regenerateBackupCodes = ()     => api.post("/auth/mfa/backup-codes/regenerate");
+
+// Source validation rules (trusted-sender allowlist)
+export const getSourceValidationRules = (schoolId, { signal } = {}) =>
+  api.get("/source-validation-rules", { headers: { "X-School-ID": schoolId }, signal });
+export const createSourceValidationRule = (data, schoolId) =>
+  api.post("/source-validation-rules", data, { headers: { "X-School-ID": schoolId } });
+export const deleteSourceValidationRule = (id, schoolId) =>
+  api.delete(`/source-validation-rules/${id}`, { headers: { "X-School-ID": schoolId } });
+
+// Fee adjustment helpers
+export const getFeeAdjustmentAffectedCount = (ruleId, schoolId) =>
+  api.get(`/fee-adjustments/${ruleId}/affected-count`, { headers: { "X-School-ID": schoolId } });

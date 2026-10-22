@@ -9,17 +9,21 @@ import RequireAdmin from "../components/RequireAdmin";
 import EmptyState, { StandaloneEmptyState } from "../components/EmptyState";
 import BlockchainStatusBadge from "../components/BlockchainStatusBadge";
 import { TableDensityControl, useTableDensity } from "../components/TableDensityControl";
+import AccessiblePagination from "../components/AccessiblePagination";
 import { SkeletonStatCard, SkeletonTableRow } from "../components/Skeleton";
 import FilterChips from "../components/FilterChips"; // Issue #107
 import Pagination from "../components/Pagination";
 import { usePaymentEvents } from "../hooks/usePaymentEvents";
 import { useRouteChangeAbort } from "../hooks/useRouteChangeAbort";
 import { getStudent, getSchool } from "../services/api";
+import useGridCellNavigation from "../hooks/useGridCellNavigation";
+import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
-  IconSearch, IconChevronLeft, IconChevronRight,
+  IconSearch,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
+import FilterChips from "../components/FilterChips";
 import { formatRelative } from "../utils/dateTime";
 import { isRetryable } from "../utils/retryClassification";
 import {
@@ -30,9 +34,11 @@ import {
 } from "../hooks/useDashboardLoader";
 
 const DEFAULT_PAGE_SIZE = 20;
+const OPTIMISTIC_STUDENT_FIELDS = ["name", "class", "parentEmail", "parentPhone", "reminderOptOut"];
 
 function Dashboard() {
   const { t } = useTranslation();
+  const studentGridProps = useGridCellNavigation();
   const timeAgo = (iso) => formatRelative(iso, t);
 
   const STATUS_BADGE = {
@@ -62,6 +68,7 @@ function Dashboard() {
   const [error, setError]                     = useState(null);
   const [editingStudent, setEditingStudent]   = useState(null);
   const [editingStudentData, setEditingStudentData] = useState(null);
+  const [mutationToast, setMutationToast] = useState("");
 
   // Table density (compact / default / comfortable) — Issue #113
   const { density, setDensity } = useTableDensity();
@@ -89,6 +96,7 @@ function Dashboard() {
   // Holds the AbortController for the most-recent fetchStudents call so
   // superseded (stale) requests can be cancelled before the next one starts.
   const studentsAbortRef = useRef(null);
+  const optimisticStudentRef = useRef(null);
 
   useEffect(() => {
     clearTimeout(searchDebounceRef.current);
@@ -210,6 +218,39 @@ function Dashboard() {
     invalidateDashboardData();
     handleCloseForm();
     fetchStudents(page, debouncedSearch, statusFilter, classFilter);
+  }
+
+  function handleOptimisticStudentUpdate(studentId, updates) {
+    const current = students.find((student) => student.studentId === studentId);
+    if (!current) return;
+    const safeUpdates = Object.fromEntries(
+      OPTIMISTIC_STUDENT_FIELDS
+        .filter((field) => Object.prototype.hasOwnProperty.call(updates, field))
+        .map((field) => [field, updates[field]])
+    );
+    optimisticStudentRef.current = {
+      studentId,
+      previous: Object.fromEntries(
+        OPTIMISTIC_STUDENT_FIELDS.map((field) => [field, current[field]])
+      ),
+    };
+    setStudents((previous) => previous.map((student) => (
+      student.studentId === studentId ? { ...student, ...safeUpdates } : student
+    )));
+  }
+
+  function handleOptimisticStudentRollback(reason) {
+    const snapshot = optimisticStudentRef.current;
+    optimisticStudentRef.current = null;
+    if (snapshot) {
+      setStudents((previous) => previous.map((student) => (
+        student.studentId === snapshot.studentId
+          ? { ...student, ...snapshot.previous }
+          : student
+      )));
+    }
+    setMutationToast(`Student update failed. Previous values restored. ${reason}`);
+    setTimeout(() => setMutationToast(""), 5000);
   }
 
   // Toggle expanded detail row for a student — Issue #113
@@ -379,6 +420,11 @@ function Dashboard() {
           {summaryError || studentsError}
         </div>
       )}
+      {mutationToast && (
+        <div role="alert" aria-live="assertive" className="alert alert-danger" style={{ position: "fixed", right: "1rem", bottom: "1rem", zIndex: 1100, maxWidth: "min(32rem, calc(100vw - 2rem))" }}>
+          {mutationToast}
+        </div>
+      )}
 
       <div className="page-wrap dash-wrap">
 
@@ -511,37 +557,41 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Filter chips — Issue #107 */}
-          {(() => {
-            const activeFilters = [
-              statusFilter && statusFilter !== "all"
-                ? { key: "status", label: t("dashboard.colStatus"), value: t(`status.student.${statusFilter}`) }
-                : null,
-              classFilter
-                ? { key: "className", label: t("dashboard.colClass"), value: classFilter }
-                : null,
-              debouncedSearch
-                ? { key: "search", label: t("dashboard.searchAria"), value: debouncedSearch }
-                : null,
-            ].filter(Boolean);
-            return activeFilters.length > 0 ? (
-              <div style={{ padding: "0 1.25rem" }}>
-                <FilterChips
-                  filters={activeFilters}
-                  onRemove={key => {
-                    if (key === "status")    setStatusFilter("all");
-                    if (key === "className") setClassFilter("");
-                    if (key === "search")    setSearch("");
-                  }}
-                  onClearAll={() => {
-                    setStatusFilter("all");
-                    setClassFilter("");
-                    setSearch("");
-                  }}
-                />
-              </div>
-            ) : null;
-          })()}
+          {/* Filter chip bar — Issue #355: show active filters as removable chips */}
+          <div style={{ paddingLeft: "1.25rem", paddingRight: "1.25rem" }}>
+            <FilterChips
+              filters={[
+                {
+                  key: "search",
+                  label: t("dashboard.searchLabel"),
+                  value: debouncedSearch,
+                  displayValue: debouncedSearch,
+                },
+                {
+                  key: "status",
+                  label: t("dashboard.statusLabel"),
+                  value: statusFilter === "all" ? "" : statusFilter,
+                  displayValue: statusFilter === "all" ? "" : t(`status.student.${statusFilter}`, { defaultValue: statusFilter }),
+                },
+                {
+                  key: "class",
+                  label: t("dashboard.classLabel"),
+                  value: classFilter,
+                  displayValue: classFilter,
+                },
+              ]}
+              onRemove={(key) => {
+                if (key === "search")  setSearch("");
+                if (key === "status")  setStatusFilter("all");
+                if (key === "class")   setClassFilter("");
+              }}
+              onClearAll={() => {
+                setSearch("");
+                setStatusFilter("all");
+                setClassFilter("");
+              }}
+            />
+          </div>
 
           {/* Table */}
           <ErrorBoundary>
@@ -557,18 +607,22 @@ function Dashboard() {
             ) : (
               <div style={{ overflowX: "auto" }} aria-busy={studentsLoading} aria-label={t("dashboard.studentTableAria")}>
                 <table
+                  {...studentGridProps}
+                  role="grid"
+                  aria-colcount={6}
+                  aria-rowcount={students.length + 1}
                   className="data-table"
                   data-density={density}
                   aria-label={studentsLoading ? t("dashboard.studentsLoadingAria") : t("dashboard.studentTableAria")}
                 >
                   <thead>
-                    <tr>
-                      <th scope="col">{t("dashboard.colStudentId")}</th>
-                      <th scope="col">{t("dashboard.colName")}</th>
-                      <th scope="col" className="col-hide-sm">{t("dashboard.colClass")}</th>
-                      <th scope="col" className="col-hide-sm">{t("dashboard.colFee")}</th>
-                      <th scope="col" className="col-hide-xs">{t("dashboard.colStatus")}</th>
-                      <th scope="col"></th>
+                    <tr role="row">
+                      <th role="columnheader" data-grid-cell scope="col">{t("dashboard.colStudentId")}</th>
+                      <th role="columnheader" data-grid-cell scope="col">{t("dashboard.colName")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-sm">{t("dashboard.colClass")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-sm">{t("dashboard.colFee")}</th>
+                      <th role="columnheader" data-grid-cell scope="col" className="col-hide-xs">{t("dashboard.colStatus")}</th>
+                      <th role="columnheader" data-grid-cell scope="col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -595,24 +649,23 @@ function Dashboard() {
                         <>
                           <tr
                             key={s.studentId}
+                            role="row"
                             className={`row-clickable${isExpanded ? " row-expanded" : ""}`}
                             onClick={() => handleRowClick(s.studentId)}
                             aria-expanded={isExpanded}
                             aria-label={isExpanded ? t("dashboard.collapseRow") : t("dashboard.expandRow")}
-                            tabIndex={0}
-                            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleRowClick(s.studentId); } }}
                           >
-                            <td className="col-mono">{s.studentId}</td>
-                            <td className="student-row-name">{s.name}</td>
-                            <td className="student-row-class col-hide-sm">{s.class}</td>
-                            <td className="student-row-fee col-hide-sm">
+                            <td role="gridcell" data-grid-cell className="col-mono">{s.studentId}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-name">{s.name}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-class col-hide-sm">{s.class}</td>
+                            <td role="gridcell" data-grid-cell className="student-row-fee col-hide-sm">
                               <span style={{ fontVariantNumeric: "tabular-nums" }}>{s.feeAmount}</span>
                               <span style={{ marginLeft: "0.25rem", fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600 }}>XLM</span>
                             </td>
-                            <td className="col-hide-xs">
+                            <td role="gridcell" data-grid-cell className="col-hide-xs">
                               <span className={badge.cls}>{badge.label}</span>
                             </td>
-                            <td>
+                            <td role="gridcell" data-grid-cell>
                               <button
                                 onClick={e => { e.stopPropagation(); handleEditStudent(s); }}
                                 className="btn btn-sm btn-ghost"
@@ -622,8 +675,8 @@ function Dashboard() {
                             </td>
                           </tr>
                           {isExpanded && (
-                            <tr key={`${s.studentId}-detail`} className="row-detail">
-                              <td colSpan="6">
+                            <tr key={`${s.studentId}-detail`} role="row" className="row-detail">
+                              <td role="gridcell" data-grid-cell colSpan="6">
                                 <div className="row-detail-grid" aria-label={t("dashboard.expandedDetails")}>
                                   <div className="row-detail-item">
                                     <span className="row-detail-label">{t("dashboard.colStudentId")}</span>
@@ -674,15 +727,17 @@ function Dashboard() {
 
           {/* Pagination */}
           {total > 0 && (
-            <Pagination
-              page={page}
-              pages={pages}
-              total={total}
-              pageSize={pageSize}
-              pageSizeOptions={[10, 20, 50]}
+            <AccessiblePagination
+              currentPage={page}
+              totalPages={pages}
               onPageChange={setPage}
-              onPageSizeChange={(size) => setPageSize(size)}
+              total={total}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
               loading={studentsLoading}
+              ariaLabel={t("dashboard.paginationAria")}
+              itemLabel={t("dashboard.studentsTitle")}
+              rangeTemplate={t("dashboard.rangeOf", { start: rangeStart, end: rangeEnd, total: total.toLocaleString() })}
             />
           )}
         </div>
@@ -693,6 +748,8 @@ function Dashboard() {
           student={editingStudentData}
           onClose={handleCloseForm}
           onSave={handleSaveStudent}
+          onOptimisticUpdate={handleOptimisticStudentUpdate}
+          onRollback={handleOptimisticStudentRollback}
         />
       )}
     </>

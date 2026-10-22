@@ -32,6 +32,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 // ── Budget thresholds ─────────────────────────────────────────────────────────
 
@@ -45,6 +46,12 @@ const MAX_CHUNK_KB = parseInt(process.env.BUNDLE_MAX_CHUNK_KB, 10) || 512;
  * first page visit.
  */
 const MAX_ROUTE_INITIAL_KB = parseInt(process.env.BUNDLE_MAX_ROUTE_INITIAL_KB, 10) || 350;
+
+/**
+ * Maximum initial gzipped JS loaded on first navigation (kB).
+ * Hard budget: 200KB gzipped for initial bundle.
+ */
+const MAX_INITIAL_GZIP_KB = parseInt(process.env.BUNDLE_MAX_INITIAL_GZIP_KB, 10) || 200;
 
 /**
  * Maximum combined size (kB) of the shared chunks loaded on every route
@@ -65,13 +72,22 @@ const CHUNKS_DIR    = path.join(NEXT_DIR, 'static', 'chunks');
 
 /** Return the on-disk size in kibibytes of a static asset path from the manifest. */
 function chunkSizeKB(relativePath) {
-  // Manifest paths look like "static/chunks/pages/dashboard-abc123.js"
-  // The physical file lives under .next/
   const full = path.join(NEXT_DIR, relativePath);
   try {
     return fs.statSync(full).size / 1024;
   } catch {
     return 0; // file not present (e.g. inlined source map)
+  }
+}
+
+/** Return the gzipped size in kibibytes of a static asset path from the manifest. */
+function chunkGzipSizeKB(relativePath) {
+  const full = path.join(NEXT_DIR, relativePath);
+  try {
+    const content = fs.readFileSync(full);
+    return zlib.gzipSync(content).length / 1024;
+  } catch {
+    return 0;
   }
 }
 
@@ -90,14 +106,20 @@ function analyseManifest(manifest) {
     // Route-specific = chunks not in the shared set
     const routeSpecific = chunks.filter(c => !sharedChunks.has(c));
     const routeKB       = routeSpecific.reduce((sum, c) => sum + chunkSizeKB(c), 0);
-    const allChunkSizes = chunks.map(c => ({ path: c, kb: chunkSizeKB(c) }));
+    const routeGzipKB   = routeSpecific.reduce((sum, c) => sum + chunkGzipSizeKB(c), 0);
+    const allChunkSizes = chunks.map(c => ({
+      path: c,
+      kb: chunkSizeKB(c),
+      gzipKb: chunkGzipSizeKB(c),
+    }));
 
-    results.push({ route, chunks, routeSpecific, routeKB, allChunkSizes });
+    results.push({ route, chunks, routeSpecific, routeKB, routeGzipKB, allChunkSizes });
   }
 
   const sharedKB = [...sharedChunks].reduce((sum, c) => sum + chunkSizeKB(c), 0);
+  const sharedGzipKB = [...sharedChunks].reduce((sum, c) => sum + chunkGzipSizeKB(c), 0);
 
-  return { results, sharedKB, sharedChunks };
+  return { results, sharedKB, sharedGzipKB, sharedChunks };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -110,7 +132,7 @@ function main() {
   }
 
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  const { results, sharedKB } = analyseManifest(manifest);
+  const { results, sharedKB, sharedGzipKB } = analyseManifest(manifest);
 
   const violations = [];
   const rows       = [];
@@ -125,21 +147,33 @@ function main() {
   rows.push({
     route: '(shared / /_app)',
     routeKB: sharedKB.toFixed(1),
+    gzipKB: sharedGzipKB.toFixed(1),
     limit: MAX_ROUTE_INITIAL_KB,
     status: sharedStatus,
   });
 
   // ── Per-route budgets ─────────────────────────────────────────────────────
-  for (const { route, allChunkSizes, routeKB } of results) {
+  for (const { route, allChunkSizes, routeKB, routeGzipKB } of results) {
     if (route === '/_app' || route === '/_error' || route === '/_document') continue;
 
-    const routeStatus = routeKB > MAX_ROUTE_INITIAL_KB ? 'OVER' : 'ok';
-    if (routeStatus === 'OVER') {
+    const routeStatus = (routeKB > MAX_ROUTE_INITIAL_KB || routeGzipKB > MAX_INITIAL_GZIP_KB) ? 'OVER' : 'ok';
+    if (routeKB > MAX_ROUTE_INITIAL_KB) {
       violations.push(
         `Route ${route}: initial JS ${routeKB.toFixed(1)} kB > ${MAX_ROUTE_INITIAL_KB} kB limit`
       );
     }
-    rows.push({ route, routeKB: routeKB.toFixed(1), limit: MAX_ROUTE_INITIAL_KB, status: routeStatus });
+    if (routeGzipKB > MAX_INITIAL_GZIP_KB) {
+      violations.push(
+        `Route ${route}: initial gzipped JS ${routeGzipKB.toFixed(1)} kB > ${MAX_INITIAL_GZIP_KB} kB gzip limit`
+      );
+    }
+    rows.push({
+      route,
+      routeKB: routeKB.toFixed(1),
+      gzipKB: routeGzipKB.toFixed(1),
+      limit: MAX_ROUTE_INITIAL_KB,
+      status: routeStatus,
+    });
 
     // ── Per-chunk budget ──────────────────────────────────────────────────
     for (const { path: chunkPath, kb } of allChunkSizes) {
@@ -152,21 +186,21 @@ function main() {
   }
 
   // ── Report ────────────────────────────────────────────────────────────────
-  console.log('\n── Bundle Budget Report ──────────────────────────────────────────────');
+  console.log('\n── Bundle Budget Report ────────────────────────────────────────────────────────');
   console.log(
-    `${'Route'.padEnd(45)} ${'JS (kB)'.padStart(9)}  Status`
+    `${'Route'.padEnd(40)} ${'JS (kB)'.padStart(9)} ${'Gzip (kB)'.padStart(11)}  Status`
   );
-  console.log('─'.repeat(65));
+  console.log('─'.repeat(74));
 
   for (const row of rows) {
     const indicator = row.status === 'OVER' ? '✗ OVER  ' : '✓ ok    ';
     console.log(
-      `${row.route.padEnd(45)} ${String(row.routeKB).padStart(9)}  ${indicator}`
+      `${row.route.padEnd(40)} ${String(row.routeKB).padStart(9)} ${String(row.gzipKB).padStart(11)}  ${indicator}`
     );
   }
 
-  console.log('─'.repeat(65));
-  console.log(`Budgets: route initial ≤ ${MAX_ROUTE_INITIAL_KB} kB  |  shared ≤ ${MAX_SHARED_KB} kB  |  chunk ≤ ${MAX_CHUNK_KB} kB`);
+  console.log('─'.repeat(74));
+  console.log(`Budgets: initial JS ≤ ${MAX_ROUTE_INITIAL_KB} kB | initial gzip ≤ ${MAX_INITIAL_GZIP_KB} kB | shared ≤ ${MAX_SHARED_KB} kB | chunk ≤ ${MAX_CHUNK_KB} kB`);
 
   if (violations.length === 0) {
     console.log('\n✓  All bundle budgets met.\n');

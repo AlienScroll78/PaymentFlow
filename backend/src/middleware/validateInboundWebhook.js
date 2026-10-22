@@ -263,16 +263,16 @@ function validateInboundWebhook(secretOrFn, options = {}) {
         auditCtx.timestamp = parsedTs;
         if (parsedTs === null) {
           recordFailureAudit('INVALID_TIMESTAMP', auditCtx);
-          return res.status(400).json({ error: 'Invalid timestamp format', code: 'INVALID_TIMESTAMP' });
+          return res.status(401).json({ error: 'Invalid timestamp format', code: 'INVALID_TIMESTAMP' });
         }
         const now = Math.floor(Date.now() / 1000);
         if (Math.abs(now - parsedTs) > toleranceSeconds) {
           recordFailureAudit('TIMESTAMP_SKEW', auditCtx);
-          return res.status(400).json({ error: 'Timestamp outside acceptable window', code: 'TIMESTAMP_SKEW' });
+          return res.status(401).json({ error: 'Timestamp outside acceptable window', code: 'TIMESTAMP_SKEW' });
         }
       } else if (requireTimestamp) {
         recordFailureAudit('MISSING_TIMESTAMP', auditCtx);
-        return res.status(400).json({ error: 'Missing X-StellarEduPay-Timestamp', code: 'MISSING_TIMESTAMP' });
+        return res.status(401).json({ error: 'Missing X-StellarEduPay-Timestamp', code: 'MISSING_TIMESTAMP' });
       }
 
       // ── 2. Signature Verification ─────────────────────────────────────────

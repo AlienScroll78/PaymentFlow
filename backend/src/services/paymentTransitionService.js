@@ -6,15 +6,14 @@
  * This is the single authoritative path for all payment status changes. It:
  *   1. Validates the transition is legal using the canonical transition tables
  *      in constants/paymentStatus.js (Issue #72 / #32).
- *   2. Applies the change via Mongoose .save() so every pre-save hook fires.
- *   3. Writes a structured audit entry (actor, from, to, reason, result).
- *   4. Returns a stable { ok, payment, previousStatus } / { ok: false, error, code }
- *      envelope so callers never have to inspect thrown exceptions for transition
- *      rejections.
+ *   2. Applies the change and audit entry in one MongoDB transaction, so
+ *      concurrent transitions serialize and cannot leave an unaudited status.
+ *   3. Writes a structured audit entry (actor, before, after, reason, result).
+ *   4. Returns { ok: true, payment, previousStatus }; invalid transitions throw
+ *      InvalidTransitionError for callers to handle explicitly.
  *
- * Illegal transitions return { ok: false } — they are NOT thrown exceptions.
- * Infrastructure failures (DB errors etc.) are still thrown so callers can
- * surface them as 500s through the normal error handler.
+ * Illegal transitions throw InvalidTransitionError. Infrastructure failures
+ * (DB errors etc.) are also thrown for the normal error handler.
  *
  * Usage:
  *   const { transition } = require('./paymentTransitionService');
@@ -33,6 +32,7 @@
  *   }
  */
 
+const mongoose = require('mongoose');
 const {
   PAYMENT_STATUS,
   PAYMENT_STATUS_TRANSITIONS,
@@ -41,6 +41,18 @@ const {
 } = require('../constants/paymentStatus');
 const { logAudit } = require('./auditService');
 const logger = require('../utils/logger');
+const Outbox = require('../models/outboxModel');
+const { randomUUID } = require('crypto');
+
+class InvalidTransitionError extends Error {
+  constructor(fromStatus, toStatus) {
+    super(`Cannot transition payment from ${fromStatus} to ${toStatus}`);
+    this.name = 'InvalidTransitionError';
+    this.code = 'INVALID_TRANSITION';
+    this.fromStatus = fromStatus;
+    this.toStatus = toStatus;
+  }
+}
 
 /**
  * Attempt a payment status transition and persist the result.
@@ -68,71 +80,87 @@ async function transition(payment, toStatus, opts = {}) {
     userAgent     = null,
   } = opts;
 
-  const fromStatus = payment.status;
   const txHash = payment.txHash;
-
-  // ── 1. Validate ────────────────────────────────────────────────────────────
   if (!toStatus || !Object.values(PAYMENT_STATUS).includes(toStatus)) {
-    return { ok: false, error: `Unknown status: ${toStatus}`, code: 'INVALID_STATUS' };
+    throw new InvalidTransitionError(payment.status, toStatus);
   }
-
-  // Reject any attempt to transition to PENDING — it is only ever the initial
-  // state assigned at creation time.
   if (toStatus === PAYMENT_STATUS.PENDING) {
-    const err = 'Cannot transition to PENDING';
-    await _auditFailure(schoolId, txHash, fromStatus, toStatus, reason, performedBy, err, ipAddress, userAgent);
-    return { ok: false, error: err, code: 'INVALID_TRANSITION' };
+    throw new InvalidTransitionError(payment.status, toStatus);
   }
 
-  if (!isTransitionAllowed(fromStatus, toStatus, adminOverride)) {
-    const table = adminOverride ? ADMIN_PAYMENT_STATUS_TRANSITIONS : PAYMENT_STATUS_TRANSITIONS;
-    const allowed = table[fromStatus] || [];
-    const err = `Cannot transition from ${fromStatus} to ${toStatus}. Allowed: [${allowed.join(', ')}]`;
-    await _auditFailure(schoolId, txHash, fromStatus, toStatus, reason, performedBy, err, ipAddress, userAgent);
-    return { ok: false, error: err, code: 'INVALID_TRANSITION' };
+  const session = await mongoose.startSession();
+  let result;
+  try {
+    await session.withTransaction(async () => {
+      let current = await payment.constructor.findOne({ _id: payment._id, schoolId }).session(session);
+      if (!current && payment.isNew) {
+        const initialState = { ...payment.toObject(), ...(opts.initialUpdates || {}), status: payment.status || PAYMENT_STATUS.PENDING };
+        [current] = await payment.constructor.create([initialState], { session });
+      }
+      if (!current) {
+        const error = new Error('Payment not found');
+        error.code = 'NOT_FOUND';
+        throw error;
+      }
+
+      const fromStatus = current.status;
+      if (fromStatus === toStatus) {
+        result = { ok: true, payment: current, previousStatus: fromStatus, unchanged: true };
+        return;
+      }
+      if (!isTransitionAllowed(fromStatus, toStatus, adminOverride)) {
+        throw new InvalidTransitionError(fromStatus, toStatus);
+      }
+
+      current.set(opts.updates || {});
+      current.status = toStatus;
+      if (adminOverride) {
+        current.$locals = current.$locals || {};
+        current.$locals.adminOverride = true;
+      }
+      await current.save({ session });
+
+      await logAudit({
+        schoolId,
+        action: 'payment_status_transition',
+        performedBy,
+        targetId: current.txHash || txHash || String(current._id),
+        targetType: 'payment',
+        details: {
+          before: { status: fromStatus },
+          after: { status: toStatus },
+          reason: reason || null,
+          adminOverride: !!adminOverride,
+          transitionedAt: new Date().toISOString(),
+        },
+        result: 'success',
+        ipAddress,
+        userAgent,
+        session,
+        throwOnFailure: true,
+      });
+
+      if (opts.emitPaymentSaved) {
+        await Outbox.create([{
+          eventId: randomUUID(),
+          eventType: 'payment.saved',
+          aggregateId: current.txHash,
+          aggregateType: 'payment',
+          payload: current.toObject(),
+        }], { session });
+      }
+
+      result = { ok: true, payment: current, previousStatus: fromStatus };
+    });
+    return result;
+  } catch (error) {
+    if (error instanceof InvalidTransitionError) {
+      await _auditFailure(schoolId, txHash, error.fromStatus, toStatus, reason, performedBy, error.message, ipAddress, userAgent);
+    }
+    throw error;
+  } finally {
+    await session.endSession();
   }
-
-  // ── 2. Apply ───────────────────────────────────────────────────────────────
-  // Set $locals.adminOverride so the model's pre-save hook uses the wider
-  // ADMIN_PAYMENT_STATUS_TRANSITIONS table when validating. $locals is
-  // Mongoose's per-document transient store — never persisted.
-  if (adminOverride) {
-    payment.$locals = payment.$locals || {};
-    payment.$locals.adminOverride = true;
-  }
-  payment.status = toStatus;
-
-  const updated = await payment.save();
-
-  // ── 3. Audit ───────────────────────────────────────────────────────────────
-  await logAudit({
-    schoolId,
-    action:      'payment_status_transition',
-    performedBy,
-    targetId:    txHash || String(payment._id),
-    targetType:  'payment',
-    details: {
-      from:          fromStatus,
-      to:            toStatus,
-      reason:        reason || null,
-      adminOverride: !!adminOverride,
-      transitionedAt: new Date().toISOString(),
-    },
-    result:      'success',
-    ipAddress,
-    userAgent,
-  });
-
-  logger.info('[PaymentTransitionService] Status transition recorded', {
-    schoolId,
-    txHash,
-    from: fromStatus,
-    to: toStatus,
-    performedBy,
-    adminOverride: !!adminOverride,
-  });
-
-  return { ok: true, payment: updated, previousStatus: fromStatus };
 }
 
 /**
@@ -187,4 +215,4 @@ async function transitionByHash(Payment, txHash, toStatus, opts = {}) {
   return transition(payment, toStatus, opts);
 }
 
-module.exports = { transition, transitionByHash };
+module.exports = { transition, transitionByHash, InvalidTransitionError };

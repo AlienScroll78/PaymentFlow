@@ -269,7 +269,7 @@ describe('Error handling', () => {
     await waitFor(() => {
       const alert = document.querySelector('[role="alert"]');
       expect(alert).not.toBeNull();
-    }, { timeout: 5000 });
+    });
   });
 });
 
@@ -316,7 +316,7 @@ describe('Accessibility — error region', () => {
     await waitFor(() => {
       const alertEl = document.querySelector('[role="alert"]');
       expect(alertEl).not.toBeNull();
-    }, { timeout: 5000 });
+    });
   });
 
   it('error alert element is focusable (tabIndex="-1") for focus management', async () => {
@@ -409,7 +409,7 @@ describe('Accessibility — not-found error', () => {
       const alert = document.querySelector('[role="alert"]');
       expect(alert).not.toBeNull();
       expect(alert.textContent).toBeTruthy();
-    }, { timeout: 5000 });
+    });
   });
 });
 

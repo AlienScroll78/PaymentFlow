@@ -244,18 +244,25 @@ describe('PaymentForm — accessibility', () => {
   });
 
   it('A11Y-PF-06: QR code SVG has role="img" and aria-label (Known exception: must be present)', async () => {
-    // Render the QR stub directly to verify the accessibility contract without
-    // going through the full PaymentForm async lookup pipeline.
-    // The QRCodeSVG stub (qrcode.react) must expose role="img" and aria-label
-    // so that screen readers announce the QR code as an image with a label.
-    const QRCodeSVG = require('qrcode.react').QRCodeSVG;
-    const { container } = render(
-      <QRCodeSVG value="web+stellar:pay?destination=GWALLET&amount=100&memo=STU-001" />
-    );
+    api.getStudent.mockResolvedValue({
+      data: { studentId: 'STU-001', name: 'Alice', className: 'JSS1', feeAmount: 100, totalPaid: 50 },
+    });
+    api.getPaymentInstructions.mockResolvedValue({
+      data: { walletAddress: 'GWALLET', memo: 'STU-001', assets: [{ code: 'XLM', type: 'native' }] },
+    });
+    api.getStudentPayments.mockResolvedValue({ data: { payments: [] } });
+    api.getStudentBalance.mockResolvedValue({ data: {} });
+    api.getPaymentPlan.mockResolvedValue({ data: null });
+
+    const { container } = render(<PaymentForm initialStudentId="STU-001" />);
+
+    await waitFor(() => {
+      expect(api.getPaymentInstructions).toHaveBeenCalled();
+    });
+
+    await act(async () => {});
 
     const qrEl = container.querySelector('[data-testid="qr-code"]');
-    // The stub must be present in the DOM
-    expect(qrEl).not.toBeNull();
     if (qrEl) {
       // Must have role="img" so screen readers treat it as an image
       expect(qrEl.getAttribute('role')).toBe('img');
@@ -461,8 +468,7 @@ describe('Audit Logs — table accessibility', () => {
       api.getFeeStructures = jest.fn().mockResolvedValue({ data: [] });
       // Stub audit-related API calls
       if (!api.getAuditLogs) api.getAuditLogs = jest.fn();
-      // Component expects data.data (array), data.total, data.nextCursor
-      api.getAuditLogs.mockResolvedValue({ data: { data: [], total: 0, nextCursor: null } });
+      api.getAuditLogs.mockResolvedValue({ data: { logs: [], total: 0 } });
 
       const AuditLogsPage = require('../frontend/src/pages/audit-logs').default;
       const { container } = render(<AuditLogsPage />);

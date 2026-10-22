@@ -65,6 +65,22 @@ const fr = {
     back: "Retour",
   },
 
+  pagination: {
+    label: "Pagination",
+    firstPage: "Première page",
+    lastPage: "Dernière page",
+    previousPage: "Page précédente",
+    nextPage: "Page suivante",
+    firstPageAria: "Aller à la première page sur {{total}}",
+    lastPageAria: "Aller à la dernière page sur {{total}}",
+    previousPageAria: "Aller à la page précédente (page {{page}} sur {{total}})",
+    nextPageAria: "Aller à la page suivante (page {{page}} sur {{total}})",
+    pageAria: "Page {{page}} sur {{total}}",
+    ellipsis: "Plus de pages",
+    rangeOf: "{{start}}–{{end}} sur {{total}} {itemLabel}",
+    shortcutHint: "Appuyez sur g suivi d'un numéro pour aller à cette page",
+  },
+
   time: {
     never: "Jamais",
     justNow: "À l'instant",
@@ -277,6 +293,7 @@ const fr = {
     verifying: "Vérification…",
     submit: "Vérifier la transaction",
     verificationFailed: "Échec de la vérification. Vérifiez le hash de transaction et réessayez.",
+    alreadyCreated: "Ce paiement a déjà été créé. Aucun doublon n'a été enregistré.",
     checkNetworkStatus: "Vérifier le statut du réseau Stellar ↗",
     transactionFound: "Transaction trouvée",
     amount: "Montant",

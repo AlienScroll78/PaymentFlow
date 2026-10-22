@@ -834,14 +834,21 @@ PaymentFlow/
 
 | Document | Description |
 |----------|-------------|
+| [`docs/quick-start.md`](docs/quick-start.md) | **Contributor quick-start guide** — clone to running tests in 15 min |
 | [`docs/architecture.md`](docs/architecture.md) | System design and data flow |
 | [`docs/api-spec.md`](docs/api-spec.md) | Full API reference |
 | [`docs/stellar-integration.md`](docs/stellar-integration.md) | Stellar-specific details |
+| [`docs/stellar-finality-policy.md`](docs/stellar-finality-policy.md) | SUBMITTED status, ledger finality polling, P50/P99 latency, FINALITY_TIMEOUT runbook |
 | [`docs/payment-limits.md`](docs/payment-limits.md) | Payment limits configuration |
 | [`docs/security.md`](docs/security.md) | Security model and threat analysis |
+| [`docs/key-rotation.md`](docs/key-rotation.md) | Signer key rotation runbook |
 | [`docs/WEBHOOK_INTEGRATION.md`](docs/WEBHOOK_INTEGRATION.md) | Webhook setup and HMAC verification |
 | [`docs/idempotency-payment-verification.md`](docs/idempotency-payment-verification.md) | Idempotency key design |
 | [`docs/QUICK_START_DOCKER.md`](docs/QUICK_START_DOCKER.md) | Docker quick start |
+| [`docs/docker-troubleshooting.md`](docs/docker-troubleshooting.md) | Local Docker Compose troubleshooting — top issues, diagnostics, reset procedures |
+| [`docs/migrations.md`](docs/migrations.md) | Database migration authoring standards, rollback policy, and safe backfill patterns |
+| [`docs/api-pagination-filtering.md`](docs/api-pagination-filtering.md) | Cursor pagination and filtering guide with JS/Python examples and anti-patterns |
+| [`docs/runbooks/incident-response.md`](docs/runbooks/incident-response.md) | Incident response runbook — severity framework, SLAs, escalation, communication templates |
 | [`docs/payment-lifecycle.md`](docs/payment-lifecycle.md) | Payment status, confirmation, retry, and reconciliation lifecycle |
 | [`docs/environment-reference.md`](docs/environment-reference.md) | Complete environment-variable ownership and secret-sensitivity reference |
 
@@ -867,6 +874,8 @@ See [`CHANGELOG.md`](CHANGELOG.md) for a complete history of changes, breaking c
 ---
 
 ## Contributing
+
+**New here?** Start with the [**Contributor Quick-Start Guide →**](docs/quick-start.md) — it walks you through cloning, environment setup, running tests, and opening your first PR in under 15 minutes.
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`

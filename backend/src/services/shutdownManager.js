@@ -35,6 +35,14 @@ function isShutdownInProgress() {
   return shutdownStarted;
 }
 
+/**
+ * Mark shutdown as started. Must be called at the top of the shutdown sequence
+ * so that duplicate signals are properly deduped via isShutdownInProgress().
+ */
+function markShutdownStarted() {
+  shutdownStarted = true;
+}
+
 async function drainWorkers() {
   const results = { txQueue: false, retryQueue: false };
 
@@ -101,6 +109,14 @@ async function closeQueues() {
       const retryQueue = require('../services/bullMQRetryService');
       if (retryQueue.shutdownQueue) await retryQueue.shutdownQueue();
     }},
+    { name: 'reportQueue', fn: async () => {
+      const reportQueue = require('./reportQueueService');
+      if (reportQueue.stopWorker) await reportQueue.stopWorker();
+    }},
+    { name: 'genericDeadLetterQueues', fn: async () => {
+      const deadLetterQueue = require('../queue/deadLetterQueue');
+      if (deadLetterQueue.closeDeadLetterQueues) await deadLetterQueue.closeDeadLetterQueues();
+    }},
   ];
 
   for (const op of closeOps) {
@@ -127,6 +143,24 @@ async function stopAcceptingNewWork() {
       const leaderElection = require('./leaderElection');
       if (leaderElection.stop) await leaderElection.stop();
     }},
+    // Always-start services — must be stopped before draining the queues so no
+    // new jobs are submitted while we wait for in-flight work to finish.
+    { name: 'txQueueWorker', fn: async () => {
+      const { stopWorker } = require('./transactionQueueService');
+      if (stopWorker) await stopWorker();
+    }},
+    { name: 'outboxDispatcher', fn: async () => {
+      const { stopOutboxDispatcher } = require('./outboxDispatcher');
+      if (stopOutboxDispatcher) stopOutboxDispatcher();
+    }},
+    { name: 'reportQueueWorker', fn: async () => {
+      const { stopWorker } = require('./reportQueueService');
+      if (stopWorker) await stopWorker();
+    }},
+    { name: 'reportCacheInvalidator', fn: async () => {
+      const { close } = require('./reportCacheInvalidator');
+      if (close) await close();
+    }},
   ];
 
   for (const op of stopOps) {
@@ -143,6 +177,7 @@ module.exports = {
   setReady,
   isReady,
   isShutdownInProgress,
+  markShutdownStarted,
   drainWorkers,
   notifySSEClients,
   closeQueues,

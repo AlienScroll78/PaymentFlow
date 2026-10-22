@@ -16,6 +16,7 @@ const en = {
     auditLogs: "Audit Logs",
     disputes: "Disputes",
     webhooks: "Webhooks",
+  deadLetter: "Dead-Letter Queue",
     sidebarAria: "Sidebar navigation",
     section: "Navigation",
     language: "Language",
@@ -66,6 +67,22 @@ const en = {
     next: "Next",
     delete: "Delete",
     back: "Back",
+  },
+
+  pagination: {
+    label: "Pagination",
+    firstPage: "First page",
+    lastPage: "Last page",
+    previousPage: "Previous page",
+    nextPage: "Next page",
+    firstPageAria: "Go to first page of {{total}}",
+    lastPageAria: "Go to last page of {{total}}",
+    previousPageAria: "Go to previous page (page {{page}} of {{total}})",
+    nextPageAria: "Go to next page (page {{page}} of {{total}})",
+    pageAria: "Page {{page}} of {{total}}",
+    ellipsis: "More pages",
+    rangeOf: "{{start}}–{{end}} of {{total}} {itemLabel}",
+    shortcutHint: "Press g followed by a number to jump to that page",
   },
 
   time: {
@@ -304,6 +321,7 @@ const en = {
     verifying: "Verifying…",
     submit: "Verify Transaction",
     verificationFailed: "Verification failed. Check the transaction hash and try again.",
+    alreadyCreated: "This payment has already been created. No duplicate was recorded.",
     checkNetworkStatus: "Check Stellar Network Status ↗",
     transactionFound: "Transaction Found",
     amount: "Amount",
@@ -793,6 +811,7 @@ const en = {
 
   errorBoundary: {
     title: "Something went wrong",
+    sectionTitle: "Something went wrong in {{section}}",
     body: "An unexpected error occurred. You can try reloading the page or go back to safety.",
     reload: "Reload page",
     goBack: "Go back",
@@ -937,6 +956,12 @@ const en = {
     futureDatesWarning: "Future dates selected",
     applyRange: "Apply",
     customRange: "Custom range",
+  },
+
+  sessionExpiry: {
+    warningToast: "Your session will expire in {{minutes}} minutes. Please save your work.",
+    draftRestored: "Your draft was restored from before your session expired.",
+    discardDraft: "Discard",
   },
 };
 

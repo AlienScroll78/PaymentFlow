@@ -11,7 +11,10 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 import { IconAlertTriangle, IconCheck, IconDollarSign, IconChevronLeft, IconChevronRight } from "../components/Icons";
 import PageHero from "../components/PageHero";
+import AccessiblePagination from "../components/AccessiblePagination";
 import ConfirmDialog from "../components/ConfirmDialog"; // Issue #108
+import { SkeletonTable } from "../components/Skeleton";
+import { useAbortController } from "../hooks/useAbortController";
 
 const EMPTY_FORM = {
   className: "",
@@ -39,6 +42,9 @@ export default function FeesPage() {
   const [pendingDelete, setPendingDelete] = useState(null); // { fee, studentCount }
   const [deleteError, setDeleteError]     = useState(null);
 
+  // Issue #254 — abort in-flight fee requests when the component unmounts.
+  const { signal } = useAbortController();
+
   const successRef = useRef(null);
 
   useEffect(() => {
@@ -58,14 +64,18 @@ export default function FeesPage() {
   function loadFees(page = 1) {
     setLoading(true);
     setError(null);
-    getFeeStructures({ page, limit: pagination.limit })
+    getFeeStructures({ signal, page, limit: pagination.limit })
       .then(({ data }) => {
         setFees(data.data || data);
         if (data.pagination) {
           setPagination(data.pagination);
         }
       })
-      .catch(() => setError(t("fees.failedToLoad")))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError(t("fees.failedToLoad"));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -323,11 +333,7 @@ export default function FeesPage() {
           </div>
 
           {loading ? (
-            <div className="card-body">
-              <p aria-busy="true" style={{ color: "var(--text-muted)" }}>
-                {t("fees.loading")}
-              </p>
-            </div>
+            <div className="card-body"><SkeletonTable columns={[90, 90, 100, "100%", 36]} rows={5} /></div>
           ) : fees.length === 0 ? (
             <div className="card-body">
               <p style={{ color: "var(--text-muted)" }}>
@@ -390,27 +396,17 @@ export default function FeesPage() {
               </table>
             </div>
             {pagination.totalPages > 1 && (
-              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "0.5rem", padding: "1rem", borderTop: "1px solid var(--border)" }}>
-                <button
-                  onClick={() => loadFees(pagination.page - 1)}
-                  disabled={!pagination.hasPrev || loading}
-                  className="btn btn-sm btn-ghost"
-                  aria-label={t("actions.previousPage")}
-                >
-                  <IconChevronLeft size={16} />
-                </button>
-                <span style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
-                  {t("pagination.page", { current: pagination.page, total: pagination.totalPages })}
-                </span>
-                <button
-                  onClick={() => loadFees(pagination.page + 1)}
-                  disabled={!pagination.hasNext || loading}
-                  className="btn btn-sm btn-ghost"
-                  aria-label={t("actions.nextPage")}
-                >
-                  <IconChevronRight size={16} />
-                </button>
-              </div>
+              <AccessiblePagination
+                currentPage={pagination.page}
+                totalPages={pagination.totalPages}
+                onPageChange={(p) => loadFees(p)}
+                total={pagination.total}
+                rangeStart={(pagination.page - 1) * pagination.limit + 1}
+                rangeEnd={Math.min(pagination.page * pagination.limit, pagination.total)}
+                loading={loading}
+                ariaLabel={t("fees.title")}
+                itemLabel={t("fees.title")}
+              />
             )}
           )}
         </div>

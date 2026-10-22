@@ -356,9 +356,12 @@ async function _sendToUrl({
     headers['X-StellarEduPay-Signature-V2'] = `sha256=${generateSignatureV2(timestamp, deliveryId, rawBody, secret)}`;
   }
 
-  // Generic tracing header (#978); the vendor-specific correlation + signature
+  // Generic tracing header (#978, #275); the vendor-specific correlation + signature
   // headers are already set above.
-  if (correlationId) headers['X-Correlation-ID'] = correlationId;
+  if (correlationId) {
+    headers['X-Correlation-ID'] = correlationId;
+    headers['X-Request-ID'] = correlationId;
+  }
 
   const http = _buildAxiosInstance();
   const startTime = Date.now();

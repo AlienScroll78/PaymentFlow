@@ -10,6 +10,7 @@
  */
 
 const { runProviderReconciliation, listDiscrepancies, updateDiscrepancyReview } = require('../services/providerReconciliationJob');
+const PaymentReconciliationRun = require('../models/paymentReconciliationRunModel');
 const logger = require('../utils/logger').child('ReconciliationAdminController');
 
 const MAX_RANGE_DAYS = parseInt(process.env.RECONCILIATION_MAX_RANGE_DAYS, 10) || 90;
@@ -130,4 +131,27 @@ async function reviewDiscrepancy(req, res, next) {
   }
 }
 
-module.exports = { triggerRun, getDiscrepancies, reviewDiscrepancy };
+async function getPaymentReconciliationRuns(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '25', 10)));
+    const filter = {};
+    if (req.query.status && ['running', 'completed', 'failed'].includes(req.query.status)) {
+      filter.status = req.query.status;
+    }
+
+    const [runs, total] = await Promise.all([
+      PaymentReconciliationRun.find(filter)
+        .sort({ startedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      PaymentReconciliationRun.countDocuments(filter),
+    ]);
+    return res.json({ data: runs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { triggerRun, getDiscrepancies, reviewDiscrepancy, getPaymentReconciliationRuns };

@@ -712,6 +712,7 @@ async function handleMe(req, res) {
     schoolId: p.schoolId || null,
     timezone,
     roles:    Array.isArray(p.roles) ? p.roles : (p.role ? [p.role] : []),
+    features,
     exp:      p.exp      || null,
   });
 }

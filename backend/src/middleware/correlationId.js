@@ -23,7 +23,8 @@
  *     cannot flood logs with arbitrarily long strings.
  */
 
-const { generateCorrelationId } = require('../utils/correlationId');
+const { generateCorrelationId, isValidUuidV4, generateUuidV4 } = require('../utils/correlationId');
+const { asyncLocalStorage } = require('../utils/logger');
 
 /**
  * Characters outside this set are stripped from incoming IDs.
@@ -40,23 +41,47 @@ const MAX_LENGTH = 128;
  */
 function sanitizeCorrelationId(raw) {
   if (!raw || typeof raw !== 'string') return null;
-  const cleaned = raw.replace(UNSAFE_CHARS, '').slice(0, MAX_LENGTH);
+  const cleaned = raw.trim().replace(UNSAFE_CHARS, '').slice(0, MAX_LENGTH);
   return cleaned.length > 0 ? cleaned : null;
 }
 
 /**
  * Express middleware.  Must be mounted BEFORE `requestLogger` so the logger
  * can use the already-resolved ID rather than generating a second one.
+ *
+ * Validates UUID v4 if provided; if invalid or missing, generates a new UUID v4.
+ * Attaches to req.correlationId & req.requestId, sets X-Request-ID & X-Correlation-ID response headers,
+ * and enters asyncLocalStorage so all request logs include correlationId.
  */
 function correlationIdMiddleware(req, res, next) {
-  const incoming = req.headers['x-correlation-id'];
-  const sanitized = sanitizeCorrelationId(incoming);
-  const correlationId = sanitized || generateCorrelationId();
+  const incoming = req.headers['x-request-id'] || req.headers['x-correlation-id'];
+  let correlationId;
+
+  if (incoming && typeof incoming === 'string') {
+    const trimmed = incoming.trim();
+    if (isValidUuidV4(trimmed)) {
+      correlationId = trimmed;
+    } else {
+      const sanitized = sanitizeCorrelationId(trimmed);
+      correlationId = sanitized || generateUuidV4();
+    }
+  } else {
+    correlationId = generateUuidV4();
+  }
 
   req.correlationId = correlationId;
+  req.requestId = correlationId;
+
+  res.setHeader('X-Request-ID', correlationId);
   res.setHeader('X-Correlation-ID', correlationId);
 
-  next();
+  if (asyncLocalStorage && typeof asyncLocalStorage.run === 'function') {
+    asyncLocalStorage.run({ correlationId, requestId: correlationId }, () => {
+      next();
+    });
+  } else {
+    next();
+  }
 }
 
 module.exports = { correlationIdMiddleware, sanitizeCorrelationId };

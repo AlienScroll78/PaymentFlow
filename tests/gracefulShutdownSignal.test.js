@@ -181,6 +181,23 @@ describe('SIGTERM graceful shutdown', () => {
       shutdownQueue: jest.fn().mockResolvedValue(undefined),
     }));
 
+    // shutdownManager.stopAcceptingNewWork now also stops these always-start services;
+    // mock them so the shutdown chain doesn't reach real BullMQ/Redis connections.
+    jest.doMock('../backend/src/services/outboxDispatcher', () => ({
+      startOutboxDispatcher: jest.fn(),
+      stopOutboxDispatcher: jest.fn(),
+    }));
+
+    jest.doMock('../backend/src/services/reportQueueService', () => ({
+      startWorker: jest.fn(),
+      stopWorker: jest.fn().mockResolvedValue(undefined),
+    }));
+
+    jest.doMock('../backend/src/services/reportCacheInvalidator', () => ({
+      invalidate: jest.fn(),
+      close: jest.fn().mockResolvedValue(undefined),
+    }));
+
     // shutdownManager drains/stops these lazily during shutdown; unmocked they
     // reach into real BullMQ/redis and never resolve, stalling the chain before
     // it can close the queues and disconnect.
@@ -259,5 +276,58 @@ describe('SIGTERM graceful shutdown', () => {
     expect(mongoose.disconnect).toHaveBeenCalledTimes(1);
     expect(processExitSpy).toHaveBeenCalledWith(0);
     expect(processExitSpy).not.toHaveBeenCalledWith(1);
+  });
+
+  it('ignores duplicate signals — shutdown runs only once', async () => {
+    // The duplicate-signal guard relies on markShutdownStarted being called
+    // at the very top of shutdown(), before any async work. Without it,
+    // isShutdownInProgress() always returns false and a second signal races.
+    const logger = require('../backend/src/utils/logger');
+    require('../backend/src/app');
+
+    process.emit('SIGTERM');
+    process.emit('SIGTERM'); // duplicate — should be ignored
+    process.emit('SIGINT');  // duplicate — should be ignored
+    await flushUntilExit();
+
+    // The duplicate-signal path logs a warn
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('ignoring duplicate signal')
+    );
+
+    // Queues and DB close exactly once despite three signals
+    expect(closeQueue).toHaveBeenCalledTimes(1);
+    expect(mongoose.disconnect).toHaveBeenCalledTimes(1);
+    expect(processExitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('forced exit logs a structured reason when the shutdown deadline is exceeded', async () => {
+    jest.useFakeTimers();
+
+    const logger = require('../backend/src/utils/logger');
+    // Make server.close() never call its callback — simulates hung in-flight requests.
+    mockServer.close = jest.fn(() => { /* never resolves */ });
+
+    process.env.SHUTDOWN_TIMEOUT_MS = '1000';
+    require('../backend/src/app');
+
+    process.emit('SIGTERM');
+    // Advance past the deadline
+    jest.advanceTimersByTime(1500);
+    // Flush microtasks so the timer callback runs
+    await Promise.resolve();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        reason: 'shutdown_timeout',
+        timeoutMs: expect.any(Number),
+        signal: 'SIGTERM',
+      })
+    );
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+
+    jest.useRealTimers();
+    delete process.env.SHUTDOWN_TIMEOUT_MS;
   });
 });
