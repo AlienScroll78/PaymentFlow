@@ -1,5 +1,38 @@
 'use strict';
 
+/**
+ * auditService — append-only audit log with HMAC hash chain.
+ *
+ * ## Cursor-based pagination (Issue #40)
+ *
+ * `getAuditLogs` supports two pagination modes:
+ *
+ * ### Mode 1 — Cursor (recommended for long exports)
+ *   Pass the `cursor` string returned in a prior response's `nextCursor`
+ *   field. The cursor is an HMAC-SHA256-signed, base64url-encoded JSON token
+ *   that encodes the last record's `(createdAt, _id)` position together with
+ *   the active filter set and an expiry timestamp.
+ *
+ *   - **Stable**: uses keyset pagination (`$lt createdAt / _id`), so concurrent
+ *     inserts cannot cause records to be skipped or duplicated.
+ *   - **Tamper-proof**: any modification to the token causes signature
+ *     verification to fail and the request is rejected with `INVALID_CURSOR`.
+ *   - **Expiry**: cursors expire after 1 hour (configurable via
+ *     `AUDIT_CURSOR_HMAC_KEY` env var). Expired cursors return `INVALID_CURSOR`.
+ *   - **Filter-locked**: the cursor encodes the active filters; changing a
+ *     filter param while using a cursor from a different filter set is rejected.
+ *
+ * ### Mode 2 — Offset (default, backwards-compatible)
+ *   Pass `page` and `limit` as before. Offset pagination may skip or
+ *   duplicate records under concurrent inserts, but is simpler for small
+ *   result sets and backwards-compatible with existing clients.
+ *
+ * ### Response fields
+ *   - `nextCursor` — opaque cursor string to pass for the next page, or
+ *     `null` when there are no more records.
+ *   - `cursorExpiry` — ISO 8601 expiry timestamp for `nextCursor`.
+ */
+
 const crypto = require('crypto');
 const AuditLog = require('../models/auditLogModel');
 const logger = require('../utils/logger');
@@ -7,6 +40,17 @@ const logger = require('../utils/logger');
 // HMAC key for entry hashes. Falls back to JWT_SECRET so no new env var is
 // required; operators can add AUDIT_HMAC_KEY to isolate the secret.
 const HMAC_KEY = process.env.AUDIT_HMAC_KEY || process.env.JWT_SECRET || 'audit-integrity-key';
+
+// Separate HMAC key for pagination cursors so rotating the cursor key does
+// not invalidate stored entry hashes (or vice-versa).
+const CURSOR_HMAC_KEY =
+  process.env.AUDIT_CURSOR_HMAC_KEY ||
+  process.env.AUDIT_HMAC_KEY ||
+  process.env.JWT_SECRET ||
+  'cursor-key';
+
+/** Cursors expire after 1 hour by default. */
+const CURSOR_TTL_MS = 60 * 60 * 1000;
 
 // In-process failure counter — reset on restart
 let _auditFailureCount = 0;
@@ -107,31 +151,115 @@ async function logAudit({
 
 const MAX_PAGE_SIZE = 200;
 
+// ── Cursor encode / decode ────────────────────────────────────────────────────
+
 /**
- * Decode a cursor token or return null if invalid.
- * Cursor format: base64-encoded JSON { createdAt, _id }
+ * Build a canonical filter fingerprint so cursors are tied to the active
+ * filter set. Changing any filter param while using an old cursor is detected
+ * and rejected.
+ *
+ * Only the fields that affect the query are included. Page/limit/cursor are
+ * intentionally excluded.
  */
-function _decodeCursor(cursorToken) {
-  if (!cursorToken) return null;
+function _filterFingerprint({ schoolId, action, targetType, performedBy, result, search, startDate, endDate }) {
+  return JSON.stringify({ schoolId, action, targetType, performedBy, result, search, startDate, endDate });
+}
+
+/**
+ * Encode a signed, expiring pagination cursor.
+ *
+ * Payload: { createdAt (ISO), _id (hex string), filters (canonical), expiresAt (ms epoch) }
+ * Envelope: base64url({ data: JSON.stringify(payload), sig: HMAC-SHA256(data) })
+ */
+function _signCursor(entry, filters) {
+  const payload = {
+    createdAt:  entry.createdAt instanceof Date ? entry.createdAt.toISOString() : entry.createdAt,
+    _id:        String(entry._id),
+    filters:    _filterFingerprint(filters),
+    expiresAt:  Date.now() + CURSOR_TTL_MS,
+  };
+  const data = JSON.stringify(payload);
+  const sig  = crypto.createHmac('sha256', CURSOR_HMAC_KEY).update(data).digest('hex');
+  return Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
+}
+
+/**
+ * Decode and verify a pagination cursor.
+ *
+ * Returns the decoded payload, or throws an error with `code = 'INVALID_CURSOR'`
+ * if the token is malformed, tampered, expired, or locked to a different filter set.
+ */
+function _verifyCursor(token, currentFilters) {
+  let envelope;
   try {
-    const json = Buffer.from(cursorToken, 'base64').toString('utf-8');
-    const obj = JSON.parse(json);
-    return obj.createdAt && obj._id ? obj : null;
+    envelope = JSON.parse(Buffer.from(token, 'base64url').toString('utf-8'));
   } catch {
-    return null;
+    const err = new Error('Cursor is malformed');
+    err.code = 'INVALID_CURSOR';
+    throw err;
   }
+
+  const { data, sig } = envelope;
+  if (typeof data !== 'string' || typeof sig !== 'string') {
+    const err = new Error('Cursor is malformed');
+    err.code = 'INVALID_CURSOR';
+    throw err;
+  }
+
+  // Constant-time comparison to prevent timing attacks
+  const expected = crypto.createHmac('sha256', CURSOR_HMAC_KEY).update(data).digest('hex');
+  let sigMatch = false;
+  try {
+    sigMatch = crypto.timingSafeEqual(
+      Buffer.from(sig.padEnd(64, '0'), 'hex'),
+      Buffer.from(expected.padEnd(64, '0'), 'hex'),
+    ) && sig.length === expected.length;
+  } catch {
+    sigMatch = false;
+  }
+
+  if (!sigMatch) {
+    const err = new Error('Cursor signature is invalid');
+    err.code = 'INVALID_CURSOR';
+    throw err;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(data);
+  } catch {
+    const err = new Error('Cursor payload is malformed');
+    err.code = 'INVALID_CURSOR';
+    throw err;
+  }
+
+  if (Date.now() > payload.expiresAt) {
+    const err = new Error('Cursor has expired');
+    err.code = 'INVALID_CURSOR';
+    throw err;
+  }
+
+  const currentFingerprint = _filterFingerprint(currentFilters);
+  if (payload.filters !== currentFingerprint) {
+    const err = new Error('Cursor filters do not match current request');
+    err.code = 'INVALID_CURSOR';
+    throw err;
+  }
+
+  return payload;
 }
+
+// ── getAuditLogs ──────────────────────────────────────────────────────────────
 
 /**
- * Encode a cursor token from an audit log entry.
+ * Retrieve paginated audit logs.
+ *
+ * Supports both cursor-based (stable, recommended) and offset (legacy) pagination.
+ * See module-level JSDoc for full documentation.
+ *
+ * @param {object} filters
+ * @returns {Promise<{logs, total, page, limit, pages, nextCursor, cursorExpiry}>}
  */
-function _encodeCursor(entry) {
-  return Buffer.from(JSON.stringify({
-    createdAt: entry.createdAt,
-    _id: entry._id,
-  })).toString('base64');
-}
-
 async function getAuditLogs(filters = {}) {
   const {
     schoolId, action, targetType, performedBy, result, search,
@@ -139,11 +267,11 @@ async function getAuditLogs(filters = {}) {
   } = filters;
 
   const baseQuery = { schoolId };
-  if (action) baseQuery.action = action;
-  if (targetType) baseQuery.targetType = targetType;
+  if (action)      baseQuery.action      = action;
+  if (targetType)  baseQuery.targetType  = targetType;
   if (performedBy) baseQuery.performedBy = performedBy;
-  if (result) baseQuery.result = result;
-  if (search) baseQuery.$text = { $search: search };
+  if (result)      baseQuery.result      = result;
+  if (search)      baseQuery.$text       = { $search: search };
   if (startDate || endDate) {
     baseQuery.createdAt = {};
     if (startDate) baseQuery.createdAt.$gte = new Date(startDate);
@@ -151,33 +279,91 @@ async function getAuditLogs(filters = {}) {
   }
 
   const actualLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), MAX_PAGE_SIZE);
+  const actualPage  = Math.max(parseInt(page, 10) || 1, 1);
 
+  const currentFilters = { schoolId, action, targetType, performedBy, result, search, startDate, endDate };
+
+  // ── Index hint selection ────────────────────────────────────────────────────
   let indexHint;
-  if (search)            indexHint = 'details_text';
-  else if (action)       indexHint = { schoolId: 1, action: 1, createdAt: -1 };
+  if (search)           indexHint = 'details_text';
+  else if (action)      indexHint = { schoolId: 1, action: 1, createdAt: -1 };
   else if (performedBy) indexHint = { schoolId: 1, performedBy: 1, createdAt: -1 };
   else if (targetType)  indexHint = { schoolId: 1, targetType: 1, createdAt: -1 };
-  else              indexHint = { schoolId: 1, createdAt: -1 };
+  else                  indexHint = { schoolId: 1, createdAt: -1 };
 
-  const [logs, total] = await Promise.all([
-    AuditLog.find(baseQuery)
-      .hint(indexHint)
-      .sort(search ? { score: { $meta: 'textScore' } } : { createdAt: -1 })
-      .skip(skip)
-      .limit(actualLimit)
-      .lean(),
-    AuditLog.countDocuments(baseQuery),
-  ]);
+  const sortSpec = search ? { score: { $meta: 'textScore' } } : { createdAt: -1, _id: -1 };
 
-  const nextCursor =
-    skip + logs.length < total && logs.length > 0
-      ? Buffer.from(JSON.stringify({
-          createdAt: logs[logs.length - 1].createdAt,
-          _id: logs[logs.length - 1]._id,
-        })).toString('base64')
-      : null;
+  let logs;
+  let total;
+  let usedCursor = false;
 
-  return { logs, total, page: actualPage, limit: actualLimit, pages: Math.ceil(total / actualLimit) || 1, nextCursor };
+  if (cursor) {
+    // ── Cursor mode: keyset pagination (stable under inserts) ──────────────
+    // _verifyCursor throws with code='INVALID_CURSOR' if the token is bad.
+    const cursorPayload = _verifyCursor(cursor, currentFilters);
+    usedCursor = true;
+
+    const cursorDate = new Date(cursorPayload.createdAt);
+    const cursorId   = cursorPayload._id;
+
+    // Build a keyset condition that continues from where the last page ended.
+    // We use ($lt createdAt) OR (== createdAt AND $lt _id) to handle ties.
+    const keysetCondition = {
+      $or: [
+        { createdAt: { $lt: cursorDate } },
+        { createdAt: cursorDate, _id: { $lt: cursorId } },
+      ],
+    };
+
+    const pagedQuery = { ...baseQuery, ...keysetCondition };
+
+    [logs, total] = await Promise.all([
+      AuditLog.find(pagedQuery)
+        .hint(indexHint)
+        .sort(sortSpec)
+        .limit(actualLimit)
+        .lean(),
+      AuditLog.countDocuments(baseQuery),
+    ]);
+  } else {
+    // ── Offset mode: classic page/skip pagination ─────────────────────────
+    const skip = (actualPage - 1) * actualLimit;
+
+    [logs, total] = await Promise.all([
+      AuditLog.find(baseQuery)
+        .hint(indexHint)
+        .sort(sortSpec)
+        .skip(skip)
+        .limit(actualLimit)
+        .lean(),
+      AuditLog.countDocuments(baseQuery),
+    ]);
+  }
+
+  // Build the next cursor when there are more records after this page
+  let nextCursor    = null;
+  let cursorExpiry  = null;
+  if (logs.length > 0) {
+    const lastLog     = logs[logs.length - 1];
+    const hasMore     = usedCursor
+      ? logs.length === actualLimit   // cursor mode: fetch full page → likely more
+      : (actualPage - 1) * actualLimit + logs.length < total;
+
+    if (hasMore) {
+      nextCursor   = _signCursor(lastLog, currentFilters);
+      cursorExpiry = new Date(Date.now() + CURSOR_TTL_MS).toISOString();
+    }
+  }
+
+  return {
+    logs,
+    total,
+    page:        usedCursor ? null : actualPage,
+    limit:       actualLimit,
+    pages:       Math.ceil(total / actualLimit) || 1,
+    nextCursor,
+    cursorExpiry,
+  };
 }
 
 async function getRecentAuditLogs(schoolId, limit = 10) {
@@ -302,5 +488,8 @@ module.exports = {
   _resetAuditFailureCount,
   // Exported for testing
   _computeEntryHash,
+  _signCursor,
+  _verifyCursor,
+  CURSOR_TTL_MS,
   MAX_EXPORT_ROWS,
 };

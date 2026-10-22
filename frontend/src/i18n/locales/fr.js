@@ -748,6 +748,8 @@ const fr = {
     reload: "Recharger la page",
     goBack: "Retour",
     goHome: "Accueil",
+    retry: "Réessayer",
+    correlationId: "Référence : {{id}}",
   },
 
   paymentPlan: {

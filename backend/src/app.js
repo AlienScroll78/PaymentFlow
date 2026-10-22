@@ -39,10 +39,13 @@ const webhookEndpointRoutes = require('./routes/webhookEndpointRoutes');
 const webhookDeliveryRoutes = require('./routes/webhookDeliveryRoutes');
 const paymentPlanRoutes = require('./routes/paymentPlanRoutes');
 const auditRoutes = require('./routes/auditRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const cspReportRoutes = require('./routes/cspReportRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
 const { registerPaymentSavedSubscribers } = require('./services/paymentSavedSubscribers');
+const { registerNotificationSubscribers } = require('./services/notificationCreationSubscriber');
 const { startPolling, stopPolling } = require('./services/transactionPollingService');
 const retrySelector = require('./services/retryServiceSelector');
 const { startConsistencyScheduler, stopConsistencyScheduler } = require('./services/consistencyScheduler');
@@ -65,6 +68,7 @@ const bullMQRetryService = require('./services/bullMQRetryService');
 const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
+const { correlationIdMiddleware } = require('./middleware/correlationId');
 const { createConcurrentRequestMiddleware } = require('./middleware/concurrentRequestHandler');
 const { requireAdminAuth } = require('./middleware/auth');
 const { jsonDepthGuard, deduplicateQueryParams } = require('./middleware/sanitizeRequest');
@@ -107,7 +111,8 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key', 'X-Correlation-ID'],
+  exposedHeaders: ['X-Correlation-ID'],
   credentials: true,
 }));
 app.use(cookieParser());
@@ -132,6 +137,9 @@ app.use(express.json({
     req.rawBody = buf.toString('utf8');
   },
 }));
+// Correlation ID must be resolved before requestLogger so the logger uses the
+// same ID that will be reflected in the response header.
+app.use(correlationIdMiddleware);
 app.use(requestLogger());
 
 // ── Cache-Control: no-store on auth and sensitive data routes ─────────────────
@@ -189,6 +197,7 @@ app.use('/api/webhook-deliveries', webhookDeliveryRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/payment-plans', paymentPlanRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/csp-report', cspReportRoutes);
@@ -395,7 +404,11 @@ async function shutdown(signal) {
   const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 30_000;
 
   const forceExitTimer = setTimeout(() => {
-    logger.error(`Forced exit after ${SHUTDOWN_TIMEOUT_MS}ms shutdown timeout`);
+    logger.error('Forced exit: shutdown deadline exceeded', {
+      reason: 'shutdown_timeout',
+      signal,
+      shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+    });
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
   forceExitTimer.unref();

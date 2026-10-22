@@ -19,6 +19,11 @@ let shutdownStarted = false;
 
 function setReady(value) {
   ready = value;
+  // Setting ready to false marks the start of shutdown — flip the flag so
+  // isShutdownInProgress() returns true and the duplicate-signal guard works.
+  if (!value) {
+    shutdownStarted = true;
+  }
   logger.info(`Readiness set to ${value ? 'ready' : 'not_ready'}`);
 }
 
