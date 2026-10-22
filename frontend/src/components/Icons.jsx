@@ -155,3 +155,17 @@ export const IconShield = ({ size = 15 }) => (
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
   </svg>
 );
+
+export const IconChevronsLeft = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="11 17 6 12 11 7"/>
+    <polyline points="18 17 13 12 18 7"/>
+  </svg>
+);
+
+export const IconChevronsRight = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="13 17 18 12 13 7"/>
+    <polyline points="6 17 11 12 6 7"/>
+  </svg>
+);
