@@ -102,11 +102,31 @@ function recordDeliveryFailure(event, durationMs, isDeadLetter = false, schoolId
   }
 }
 
+// ── webhook_inbound_verification_failures_total ─────────────────────────────
+const webhookInboundVerificationFailuresTotal = new client.Counter({
+  name: 'webhook_inbound_verification_failures_total',
+  help: 'Total inbound webhook verification failures by provider and reason',
+  labelNames: ['provider', 'reason'],
+  registers: [registry],
+});
+
+/**
+ * Record an inbound webhook verification failure.
+ *
+ * @param {string} provider Provider identifier
+ * @param {string} reason Reason code (e.g. INVALID_SIGNATURE, TIMESTAMP_SKEW)
+ */
+function recordInboundVerificationFailure(provider = 'stellaredupay', reason = 'UNKNOWN') {
+  webhookInboundVerificationFailuresTotal.inc({ provider, reason });
+}
+
 module.exports = {
   webhookDeliveriesTotal,
   webhookDeliveryDurationMs,
   webhookDeadLetterTotal,
+  webhookInboundVerificationFailuresTotal,
   refreshDeadLetterGauge,
   recordDeliverySuccess,
   recordDeliveryFailure,
+  recordInboundVerificationFailure,
 };
