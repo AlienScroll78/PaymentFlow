@@ -386,6 +386,7 @@ const {
   setReady,
   isReady,
   isShutdownInProgress,
+  markShutdownStarted,
   drainWorkers,
   notifySSEClients,
   closeQueues,
@@ -398,7 +399,7 @@ async function shutdown(signal) {
     return;
   }
 
-  const shutdownStartTime = Date.now();
+  markShutdownStarted();
   logger.info(`Received ${signal} signal — starting graceful shutdown`);
 
   setReady(false);

@@ -91,9 +91,19 @@ jest.mock('../backend/src/services/bullMQRetryService', () => ({
   shutdownQueue: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../backend/src/services/sseService', () => ({
+jest.mock('../backend/src/services/outboxDispatcher', () => ({
+  startOutboxDispatcher: jest.fn(),
+  stopOutboxDispatcher: jest.fn(),
+}));
+
+jest.mock('../backend/src/services/reportQueueService', () => ({
+  startWorker: jest.fn(),
+  stopWorker: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../backend/src/services/reportCacheInvalidator', () => ({
+  invalidate: jest.fn(),
   close: jest.fn().mockResolvedValue(undefined),
-  closeAll: jest.fn().mockResolvedValue(undefined),
 }));
 
 
@@ -261,6 +271,31 @@ describe('shutdownManager', () => {
     expect(polling.stopPolling).toHaveBeenCalled();
     expect(retrySelector.stop).toHaveBeenCalled();
     expect(leaderElection.stop).toHaveBeenCalled();
+  });
+
+  // ── markShutdownStarted / duplicate-signal dedup ──────────────────────────
+
+  it('markShutdownStarted is exported and flips isShutdownInProgress to true', () => {
+    const dm = require('../backend/src/services/shutdownManager');
+
+    expect(typeof dm.markShutdownStarted).toBe('function');
+    expect(dm.isShutdownInProgress()).toBe(false);
+
+    dm.markShutdownStarted();
+
+    expect(dm.isShutdownInProgress()).toBe(true);
+  });
+
+  it('isReady returns false after markShutdownStarted, regardless of the ready flag', () => {
+    const dm = require('../backend/src/services/shutdownManager');
+
+    // Start fully ready
+    dm.setReady(true);
+    expect(dm.isReady()).toBe(true);
+
+    // Beginning shutdown must flip isReady to false even without setReady(false)
+    dm.markShutdownStarted();
+    expect(dm.isReady()).toBe(false);
   });
 });
 
