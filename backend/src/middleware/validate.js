@@ -18,6 +18,7 @@ const {
   paginationSchema,
   exportPaginationSchema,
   auditQuerySchema,
+  registerStudentSchema,
   updateStudentSchema,
   createDisputeSchema,
   createFeeAdjustmentSchema,
@@ -106,43 +107,24 @@ function validateTxHashParam(req, res, next) {
 
 /** Middleware: validate POST /api/students body */
 function validateRegisterStudent(req, res, next) {
-  const errors = [];
-  const body = req.body || {};
-
-  // studentId — optional (auto-generated if absent), but must be valid if provided
-  let studentId = body.studentId != null ? String(body.studentId).trim() : undefined;
-  if (studentId !== undefined && !validStudentId(studentId)) {
-    errors.push({ field: 'studentId', message: 'studentId must be 3–20 alphanumeric/dash/underscore characters' });
+  const { error, value } = registerStudentSchema.validate(req.body || {}, {
+    abortEarly: false,
+    convert: true,
+  });
+  if (error) {
+    const errors = error.details.map((detail) => ({
+      field: detail.path.join('.') || 'body',
+      message: detail.message,
+    }));
+    return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
   }
-
-  // name — required, sanitize
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (!name) {
-    errors.push({ field: 'name', message: 'name is required' });
+  if (value.studentId !== undefined && !validStudentId(value.studentId)) {
+    return res.status(400).json({
+      errors: [{ field: 'studentId', message: 'studentId must be 1-28 alphanumeric, dash, or underscore characters' }],
+      code: 'VALIDATION_ERROR',
+    });
   }
-
-  // class — required, sanitize
-  const className = typeof body.class === 'string' ? body.class.trim() : '';
-  if (!className) {
-    errors.push({ field: 'class', message: 'class is required' });
-  }
-
-  // feeAmount — optional, but must be positive number if provided
-  let feeAmount = body.feeAmount;
-  if (feeAmount != null) {
-    feeAmount = Number(feeAmount);
-    if (!Number.isFinite(feeAmount) || feeAmount <= 0) {
-      errors.push({ field: 'feeAmount', message: 'feeAmount must be a positive number' });
-    }
-  }
-
-  if (errors.length) return res.status(400).json({ errors });
-
-  // Write sanitized values back so the controller uses clean data
-  req.body = { ...body, name, class: className };
-  if (studentId !== undefined) req.body.studentId = studentId;
-  if (feeAmount != null) req.body.feeAmount = feeAmount;
-
+  req.body = value;
   return next();
 }
 
