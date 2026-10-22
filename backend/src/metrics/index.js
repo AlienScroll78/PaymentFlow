@@ -117,6 +117,11 @@ new client.Gauge({
         // Dead-lettered jobs land as waiting in the DLQ (no DLQ worker drains them).
         this.set({ queue: 'transaction-dead-letter' }, (m.waiting || 0) + (m.failed || 0));
       }
+
+      const genericDepths = await require('../queue/deadLetterQueue').getDeadLetterDepths();
+      for (const [queueName, depth] of Object.entries(genericDepths)) {
+        this.set({ queue: `${queueName}-dead-letter` }, depth);
+      }
     } catch (_) {
       // Redis may not be configured — scrape still succeeds
     }
