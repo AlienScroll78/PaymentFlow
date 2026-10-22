@@ -9,6 +9,7 @@ import RequireAdmin from "../components/RequireAdmin";
 import EmptyState, { StandaloneEmptyState } from "../components/EmptyState";
 import BlockchainStatusBadge from "../components/BlockchainStatusBadge";
 import { TableDensityControl, useTableDensity } from "../components/TableDensityControl";
+import AccessiblePagination from "../components/AccessiblePagination";
 import { SkeletonStatCard, SkeletonTableRow } from "../components/Skeleton";
 import FilterChips from "../components/FilterChips"; // Issue #107
 import Pagination from "../components/Pagination";
@@ -18,7 +19,7 @@ import useGridCellNavigation from "../hooks/useGridCellNavigation";
 import { getSyncStatus, getPaymentSummary, getStudents, getStudent, getSchool } from "../services/api";
 import {
   IconUsers, IconCheck, IconAlertTriangle, IconDollarSign,
-  IconSearch, IconChevronLeft, IconChevronRight,
+  IconSearch,
 } from "../components/Icons";
 import { DEFAULT_CLASS_OPTIONS, loadSchoolClassOptions } from "../utils/classOptions";
 import { formatRelative } from "../utils/dateTime";
@@ -705,15 +706,17 @@ function Dashboard() {
 
           {/* Pagination */}
           {total > 0 && (
-            <Pagination
-              page={page}
-              pages={pages}
-              total={total}
-              pageSize={pageSize}
-              pageSizeOptions={[10, 20, 50]}
+            <AccessiblePagination
+              currentPage={page}
+              totalPages={pages}
               onPageChange={setPage}
-              onPageSizeChange={(size) => setPageSize(size)}
+              total={total}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
               loading={studentsLoading}
+              ariaLabel={t("dashboard.paginationAria")}
+              itemLabel={t("dashboard.studentsTitle")}
+              rangeTemplate={t("dashboard.rangeOf", { start: rangeStart, end: rangeEnd, total: total.toLocaleString() })}
             />
           )}
         </div>

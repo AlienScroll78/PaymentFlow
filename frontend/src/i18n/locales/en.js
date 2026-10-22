@@ -69,6 +69,22 @@ const en = {
     back: "Back",
   },
 
+  pagination: {
+    label: "Pagination",
+    firstPage: "First page",
+    lastPage: "Last page",
+    previousPage: "Previous page",
+    nextPage: "Next page",
+    firstPageAria: "Go to first page of {{total}}",
+    lastPageAria: "Go to last page of {{total}}",
+    previousPageAria: "Go to previous page (page {{page}} of {{total}})",
+    nextPageAria: "Go to next page (page {{page}} of {{total}})",
+    pageAria: "Page {{page}} of {{total}}",
+    ellipsis: "More pages",
+    rangeOf: "{{start}}–{{end}} of {{total}} {itemLabel}",
+    shortcutHint: "Press g followed by a number to jump to that page",
+  },
+
   time: {
     never: "Never",
     justNow: "Just now",

@@ -3,11 +3,13 @@ import { getDisputes, resolveDispute } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
 import { useAbortController } from "../hooks/useAbortController";
 import {
-  IconAlertTriangle, IconExternalLink, IconSearch,
+  IconAlertTriangle, IconExternalLink,
+  IconSearch,
 } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import Pagination from "../components/Pagination";
 import RequireAdmin from "../components/RequireAdmin";
+import AccessiblePagination from "../components/AccessiblePagination";
 import { useTranslation } from "react-i18next";
 import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 
@@ -365,16 +367,20 @@ function DisputesContent() {
               />
             ))}
 
-            <Pagination
-              page={page}
-              pages={totalPages}
-              total={totalCount}
-              pageSize={pageSize}
-              pageSizeOptions={[10, 20, 50]}
-              onPageChange={setPage}
-              onPageSizeChange={handlePageSizeChange}
-              loading={loading}
-            />
+            {totalPages > 1 && (
+              <AccessiblePagination
+                currentPage={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                total={totalCount}
+                rangeStart={(page - 1) * 20 + 1}
+                rangeEnd={Math.min(page * 20, totalCount)}
+                loading={loading}
+                ariaLabel={t("disputes.title")}
+                itemLabel={t("disputes.title")}
+              />
+            )}
+            )}
           </div>
         )}
       </div>
