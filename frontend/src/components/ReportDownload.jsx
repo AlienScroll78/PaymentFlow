@@ -1,12 +1,16 @@
 import { useState, useEffect } from "react";
-import { getReport, getReportCsvUrl } from "../services/api";
+import { getReport } from "../services/api";
+import { getReportCsvUrl } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
+import { getServerFilename } from "../utils/downloadBlob";
 import {
   IconCalendar, IconDownload, IconBarChart, IconAlertTriangle,
   IconCheck, IconTrendingUp, IconClock, IconX,
 } from "./Icons";
 import PageHero, { StatCard } from "./PageHero";
+import { StandaloneEmptyState } from "./EmptyState";
 import { useTranslation } from "react-i18next";
+import { formatTimestamp, DISPLAY_MODE } from "../utils/dateTime";
 
 export default function ReportDownload() {
   const { t } = useTranslation();
@@ -83,19 +87,31 @@ export default function ReportDownload() {
     if (studentId) params.studentId = studentId;
     if (paymentStatus) params.paymentStatus = paymentStatus;
 
+    // Clear any previous error before starting a new download.
+    setError("");
+
     try {
       setCsvLoading(true);
       const url = getReportCsvUrl(params);
       const response = await fetch(url, {
         credentials: "include",
+        headers: { format: "csv" },
       });
       if (!response.ok) throw new Error(t("reports.downloadError"));
       const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const filename =
+
+      // Prefer the server-supplied filename from Content-Disposition; fall
+      // back to a locally-derived name that includes the selected date range.
+      const fallbackFilename =
         startDate && endDate
           ? `report-${startDate}_to_${endDate}.csv`
           : "report-all-time.csv";
+      const filename = getServerFilename(response, fallbackFilename);
+
+      // Create a temporary anchor element to trigger the browser download
+      // dialogue.  The object URL is revoked immediately after the click so
+      // it does not linger in memory.
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
       a.download = filename;
@@ -104,6 +120,7 @@ export default function ReportDownload() {
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
+      // Surface an actionable message and ensure no stale loading state remains.
       setError(t("reports.failedCsvPrefix") + (err.message || t("reports.failedCsvUnknown")));
     } finally {
       setCsvLoading(false);
@@ -138,7 +155,7 @@ export default function ReportDownload() {
         <div className="card-body">
           <form onSubmit={handleGenerate} style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">{t("reports.startDate")}</label>
+              <label className="form-label">{t("reports.startDate") || "Start Date"}</label>
               <input
                 type="date"
                 className="form-input"
@@ -148,7 +165,7 @@ export default function ReportDownload() {
               />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">{t("reports.endDate")}</label>
+              <label className="form-label">{t("reports.endDate") || "End Date"}</label>
               <input
                 type="date"
                 className="form-input"
@@ -196,7 +213,7 @@ export default function ReportDownload() {
               </select>
             </div>
             <button type="submit" disabled={loading} className="btn btn-primary" style={{ alignSelf: "flex-end" }}>
-              {loading ? t("reports.generating") : t("reports.generateReport")}
+              {loading ? "Generating..." : t("reports.generateReport")}
             </button>
             {(startDate || endDate || className || studentId || paymentStatus) && !loading && (
               <button
@@ -213,9 +230,21 @@ export default function ReportDownload() {
       </div>
 
       {error && (
-        <div className="alert alert-danger" style={{ marginBottom: "1rem" }}>
-          <IconAlertTriangle size={15} />
-          <span>{error}</span>
+        <div style={{ marginBottom: "1.5rem" }}>
+          <StandaloneEmptyState
+            variant="error"
+            title={t("reports.failedGenerate")}
+            description={error}
+            action={{ label: t("actions.retry"), onClick: (e) => handleGenerate(e) }}
+          />
+        </div>
+      )}
+
+      {loading && !report && (
+        <div className="card" style={{ marginBottom: "1.5rem" }}>
+          <StandaloneEmptyState
+            variant="loading"
+          />
         </div>
       )}
 
@@ -234,7 +263,7 @@ export default function ReportDownload() {
               {t("reports.period")} <strong>{report.period.startDate || t("reports.allTime")}</strong>
               {" → "}
               <strong>{report.period.endDate || t("reports.allTime")}</strong>
-              &nbsp;·&nbsp;{t("reports.generatedAt", { date: new Date(report.generatedAt).toLocaleString() })}
+              &nbsp;·&nbsp;{t("reports.generatedAt", { date: (() => { const r = formatTimestamp(report.generatedAt, { mode: DISPLAY_MODE.UTC }); return r.label ? `${r.formatted} ${r.label}` : r.formatted; })() })}
             </p>
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <button
@@ -257,7 +286,7 @@ export default function ReportDownload() {
                   </>
                 ) : (
                   <>
-                    <IconDownload size={14} /> {t("reports.downloadCsv")}
+                    <IconDownload size={14} /> {t("reports.downloadCsv") || "Download CSV"}
                   </>
                 )}
               </button>
@@ -293,7 +322,7 @@ export default function ReportDownload() {
                     {reportHistory.map(entry => (
                       <tr key={entry.id}>
                         <td style={{ whiteSpace: "nowrap" }}>
-                          {new Date(entry.timestamp).toLocaleString()}
+                          {(() => { const r = formatTimestamp(entry.timestamp, { mode: DISPLAY_MODE.UTC }); return r.label ? `${r.formatted} ${r.label}` : r.formatted; })()}
                         </td>
                         <td>{entry.summary.totalAmount} XLM</td>
                         <td>{entry.summary.paymentCount}</td>
@@ -415,8 +444,35 @@ export default function ReportDownload() {
               </div>
             </div>
           ) : (
-            <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>
-              <p style={{ fontWeight: 500 }}>{t("reports.noPaymentsInPeriod")}</p>
+            <div className="card">
+              <StandaloneEmptyState
+                variant={
+                  startDate || endDate || className || studentId || paymentStatus
+                    ? "filtered"
+                    : "empty"
+                }
+                title={
+                  startDate || endDate || className || studentId || paymentStatus
+                    ? t("reports.noPaymentsInPeriod")
+                    : t("reports.noPaymentsYet", "No payments recorded yet")
+                }
+                description={
+                  startDate || endDate || className || studentId || paymentStatus
+                    ? t("reports.tryAdjustingFilters", "Try adjusting your date range or clearing filters.")
+                    : t("reports.noPaymentsYetDesc", "Payment data will appear here once transactions are recorded.")
+                }
+                action={
+                  startDate || endDate || className || studentId || paymentStatus
+                    ? {
+                        label: t("reports.clearAll"),
+                        onClick: () => {
+                          setStartDate(""); setEndDate(""); setClassName("");
+                          setStudentId(""); setPaymentStatus(""); setReport(null);
+                        },
+                      }
+                    : undefined
+                }
+              />
             </div>
           )}
         </>

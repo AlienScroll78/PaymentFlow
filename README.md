@@ -388,36 +388,7 @@ node scripts/seed-test-data.js --clean  # Drop and recreate
 
 ## Environment Variables
 
-### Required
-
-| Variable | Description |
-|----------|-------------|
-| `MONGO_URI` | MongoDB connection string (must include replica set) |
-| `SCHOOL_WALLET_ADDRESS` | School's Stellar public key (`G...`) |
-| `STELLAR_NETWORK` | `testnet` or `mainnet` |
-| `JWT_SECRET` | Secret for signing JWTs (min 32 chars, keep private) |
-
-### Stellar
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `STELLAR_HORIZON_URL` | Auto from network | Override Horizon API URL |
-| `USDC_ISSUER` | Auto from network | USDC issuer address |
-
-### Payments
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MIN_PAYMENT_AMOUNT` | `0.01` | Minimum payment in XLM/USDC |
-| `MAX_PAYMENT_AMOUNT` | `100000` | Maximum payment in XLM/USDC |
-
-### Background Jobs
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POLL_INTERVAL_MS` | `30000` | Blockchain sync interval |
-| `RETRY_INTERVAL_MS` | `60000` | Failed-verification retry interval |
-| `RETRY_MAX_ATTEMPTS` | `10` | Max retry attempts before giving up |
+See the [environment variable reference](docs/environment-reference.md) for the complete source-of-truth matrix covering defaults, sensitivity, rotation ownership, environment scope, and missing-variable behavior. `MONGO_URI` and `JWT_SECRET` are required at backend startup; `SCHOOL_WALLET_ADDRESS` is optional at startup and is used by selected migration and seed flows.
 
 ### Redis / BullMQ
 
@@ -871,6 +842,8 @@ PaymentFlow/
 | [`docs/WEBHOOK_INTEGRATION.md`](docs/WEBHOOK_INTEGRATION.md) | Webhook setup and HMAC verification |
 | [`docs/idempotency-payment-verification.md`](docs/idempotency-payment-verification.md) | Idempotency key design |
 | [`docs/QUICK_START_DOCKER.md`](docs/QUICK_START_DOCKER.md) | Docker quick start |
+| [`docs/payment-lifecycle.md`](docs/payment-lifecycle.md) | Payment status, confirmation, retry, and reconciliation lifecycle |
+| [`docs/environment-reference.md`](docs/environment-reference.md) | Complete environment-variable ownership and secret-sensitivity reference |
 
 ---
 

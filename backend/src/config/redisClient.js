@@ -159,6 +159,82 @@ function isRedisReady() {
   return status.connected;
 }
 
+const REDIS_CHECK_TIMEOUT_MS = parseInt(process.env.REDIS_CHECK_TIMEOUT_MS || '2000', 10);
+
+function isRedisRequired() {
+  return process.env.REDIS_REQUIRED === 'true';
+}
+
+/**
+ * Health check probe with bounded timeout.
+ * Performs a ping operation against Redis to check live connectivity.
+ *
+ * @param {number} [timeoutMs=REDIS_CHECK_TIMEOUT_MS]
+ * @returns {Promise<{ configured: boolean, status: string, latencyMs?: number, error?: string, required: boolean }>}
+ */
+async function checkRedis(timeoutMs = REDIS_CHECK_TIMEOUT_MS) {
+  const configured = Boolean(process.env.REDIS_HOST);
+  const required = isRedisRequired();
+
+  if (!configured) {
+    return {
+      configured: false,
+      status: 'disabled',
+      required,
+    };
+  }
+
+  const c = getRedisClient();
+  if (!c) {
+    return {
+      configured: true,
+      status: 'unreachable',
+      error: 'Redis client could not be created',
+      required,
+    };
+  }
+
+  const start = Date.now();
+  let timerHandle;
+
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timerHandle = setTimeout(() => {
+        reject(new Error(`Redis did not respond to PING within ${timeoutMs}ms`));
+      }, timeoutMs);
+      if (timerHandle.unref) timerHandle.unref();
+    });
+
+    await Promise.race([
+      c.ping(),
+      timeoutPromise,
+    ]);
+
+    const latencyMs = Date.now() - start;
+    return {
+      configured: true,
+      status: 'ok',
+      latencyMs,
+      host: process.env.REDIS_HOST,
+      port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+      required,
+    };
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    return {
+      configured: true,
+      status: 'unreachable',
+      error: err.message,
+      latencyMs,
+      host: process.env.REDIS_HOST,
+      port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+      required,
+    };
+  } finally {
+    clearTimeout(timerHandle);
+  }
+}
+
 function resetRedisClient() {
   if (client) {
     try {
@@ -183,5 +259,8 @@ module.exports = {
   getRedisConnectionOptions,
   getRedisStatus,
   isRedisReady,
+  isRedisRequired,
+  checkRedis,
+  REDIS_CHECK_TIMEOUT_MS,
   resetRedisClient,
 };

@@ -4,17 +4,11 @@ import { getErrorMessage } from "../utils/errorMessages";
 import {
   IconChevronLeft, IconChevronRight, IconAlertTriangle, IconCheck,
 } from "../components/Icons";
+import EmptyState from "../components/EmptyState";
 import PageHero from "../components/PageHero";
 import RequireAdmin from "../components/RequireAdmin";
 import { useTranslation } from "react-i18next";
-
-function formatTimestamp(isoString, t) {
-  if (!isoString) return t("auditLogs.notAvailable");
-  return new Date(isoString).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 
 const ACTION_LABELS = {
   student_create:       "auditLogs.event.student_create",
@@ -304,43 +298,91 @@ function AuditLogsContent() {
             </div>
           </div>
 
-          {/* Alerts */}
-          {error && (
-            <div className="card-body">
-              <div role="alert" className="alert alert-danger">
-                <IconAlertTriangle size={16} />
-                <span>{error}</span>
-              </div>
-            </div>
-          )}
+          {/* Table — loading / error / empty / data */}
+          {(() => {
+            const hasActiveFilters = !!(actionFilter || targetTypeFilter || resultFilter || actorIdFilter || searchFilter || startDate || endDate);
 
-          {/* Table */}
-          {loading ? (
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>{t("auditLogs.colTimestamp")}</th><th>{t("auditLogs.colAction")}</th><th>{t("auditLogs.colPerformedBy")}</th>
-                    <th>{t("auditLogs.colTarget")}</th><th>{t("auditLogs.colResult")}</th><th>{t("auditLogs.colDetails")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <tr key={i}>
-                      {[100,140,80,120,60,40].map((w, j) => (
-                        <td key={j}><div className="skeleton" style={{ height: 12, width: w }} /></td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="al-empty">
-              <p style={{ fontWeight: 500, marginBottom: "0.25rem" }}>{t("auditLogs.noLogsFound")}</p>
-              <p style={{ fontSize: "0.8125rem" }}>{t("auditLogs.emptyFilters")}</p>
-            </div>
-          ) : (
+            if (error) {
+              return (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" aria-label={t("auditLogs.title")}>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("auditLogs.colTimestamp")}</th>
+                        <th scope="col">{t("auditLogs.colAction")}</th>
+                        <th scope="col">{t("auditLogs.colPerformedBy")}</th>
+                        <th scope="col">{t("auditLogs.colTarget")}</th>
+                        <th scope="col">{t("auditLogs.colResult")}</th>
+                        <th scope="col">{t("auditLogs.colDetails")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <EmptyState
+                        variant="error"
+                        colSpan={6}
+                        title={t("auditLogs.failedToLoad")}
+                        description="Check your connection and try again."
+                        action={{ label: t("actions.retry"), onClick: () => fetchLogs(null) }}
+                      />
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+
+            if (loading) {
+              return (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" aria-busy="true" aria-label={t("auditLogs.title")}>
+                    <thead>
+                      <tr>
+                        <th>{t("auditLogs.colTimestamp")}</th><th>{t("auditLogs.colAction")}</th><th>{t("auditLogs.colPerformedBy")}</th>
+                        <th>{t("auditLogs.colTarget")}</th><th>{t("auditLogs.colResult")}</th><th>{t("auditLogs.colDetails")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <EmptyState variant="loading" colSpan={6} />
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+
+            if (logs.length === 0) {
+              return (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" aria-label={t("auditLogs.title")}>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("auditLogs.colTimestamp")}</th>
+                        <th scope="col">{t("auditLogs.colAction")}</th>
+                        <th scope="col">{t("auditLogs.colPerformedBy")}</th>
+                        <th scope="col">{t("auditLogs.colTarget")}</th>
+                        <th scope="col">{t("auditLogs.colResult")}</th>
+                        <th scope="col">{t("auditLogs.colDetails")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <EmptyState
+                        variant={hasActiveFilters ? "filtered" : "empty"}
+                        colSpan={6}
+                        title={hasActiveFilters ? t("auditLogs.noLogsFound") : "No audit logs yet"}
+                        description={hasActiveFilters ? t("auditLogs.emptyFilters") : "Audit events will appear here once activity is recorded."}
+                        action={hasActiveFilters ? {
+                          label: "Clear filters",
+                          onClick: () => {
+                            setActionFilter(""); setTargetTypeFilter(""); setResultFilter("");
+                            setActorIdInput(""); setSearchInput(""); setStartDate(""); setEndDate("");
+                          }
+                        } : undefined}
+                      />
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+
+            return (
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">
                 <thead>
@@ -359,7 +401,11 @@ function AuditLogsContent() {
                     return (
                       <tr key={log._id}>
                         <td style={{ whiteSpace: "nowrap", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-                          {formatTimestamp(log.createdAt, t)}
+                          <TimestampDisplay
+                            iso={log.createdAt}
+                            mode={DISPLAY_MODE.UTC}
+                            fallback={t("auditLogs.notAvailable")}
+                          />
                         </td>
                         <td style={{ fontWeight: 500, fontSize: "0.875rem" }}>{getActionLabel(log.action, t)}</td>
                         <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>{log.performedBy}</td>
@@ -403,7 +449,8 @@ function AuditLogsContent() {
                 </tbody>
               </table>
             </div>
-          )}
+          );
+          })()}
 
           {/* Pagination */}
           {!loading && nextCursor && (
@@ -439,5 +486,13 @@ function AuditLogsContent() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function AuditLogsPage() {
+  return (
+    <RequireAdmin>
+      <AuditLogsContent />
+    </RequireAdmin>
   );
 }
