@@ -13,6 +13,7 @@ import { IconAlertTriangle, IconCheck, IconDollarSign, IconChevronLeft, IconChev
 import PageHero from "../components/PageHero";
 import ConfirmDialog from "../components/ConfirmDialog"; // Issue #108
 import { SkeletonTable } from "../components/Skeleton";
+import { useAbortController } from "../hooks/useAbortController";
 
 const EMPTY_FORM = {
   className: "",
@@ -40,6 +41,9 @@ export default function FeesPage() {
   const [pendingDelete, setPendingDelete] = useState(null); // { fee, studentCount }
   const [deleteError, setDeleteError]     = useState(null);
 
+  // Issue #254 — abort in-flight fee requests when the component unmounts.
+  const { signal } = useAbortController();
+
   const successRef = useRef(null);
 
   useEffect(() => {
@@ -59,14 +63,18 @@ export default function FeesPage() {
   function loadFees(page = 1) {
     setLoading(true);
     setError(null);
-    getFeeStructures({ page, limit: pagination.limit })
+    getFeeStructures({ signal, page, limit: pagination.limit })
       .then(({ data }) => {
         setFees(data.data || data);
         if (data.pagination) {
           setPagination(data.pagination);
         }
       })
-      .catch(() => setError(t("fees.failedToLoad")))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError(t("fees.failedToLoad"));
+      })
       .finally(() => setLoading(false));
   }
 

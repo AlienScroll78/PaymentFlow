@@ -3,12 +3,14 @@ import RequireAdmin from "../components/RequireAdmin";
 import PageHero from "../components/PageHero";
 import { IconAlertTriangle, IconCheck, IconX, IconPlus, IconRefresh } from "../components/Icons";
 import { useTranslation } from "react-i18next";
+import { useAbortController } from "../hooks/useAbortController";
 import { formatRelative } from "../utils/dateTime";
 import { SkeletonTable } from "../components/Skeleton";
 
-async function apiCall(method, path, body = null) {
+async function apiCall(method, path, body = null, signal = undefined) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
+  if (signal) opts.signal = signal;
   const res = await fetch(`/api${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -48,6 +50,10 @@ function WebhooksPage() {
   const [testingId, setTestingId] = useState(null);
   const [testResults, setTestResults] = useState({});
 
+  // Issue #254 — abort in-flight fetch calls when the component unmounts to
+  // prevent stale responses from applying to the wrong route's state.
+  const { signal } = useAbortController();
+
   useEffect(() => {
     fetchEndpoints();
   }, []);
@@ -56,9 +62,11 @@ function WebhooksPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiCall('GET', '/webhook-endpoints');
+      const data = await apiCall('GET', '/webhook-endpoints', null, signal);
       setEndpoints(data.endpoints || []);
     } catch (err) {
+      // Silently ignore requests cancelled on unmount or navigation.
+      if (err?.name === 'AbortError') return;
       setError(err.message);
     } finally {
       setLoading(false);

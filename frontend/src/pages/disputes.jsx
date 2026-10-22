@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getDisputes, resolveDispute } from "../services/api";
 import { getErrorMessage } from "../utils/errorMessages";
+import { useAbortController } from "../hooks/useAbortController";
 import {
   IconAlertTriangle, IconExternalLink, IconSearch,
 } from "../components/Icons";
@@ -211,6 +212,10 @@ function DisputesContent() {
 
   // Auth is cookie-based; the axios interceptor in api.js handles 401 → /login redirect.
 
+  // Issue #254 — abort in-flight requests when the component unmounts so we
+  // never call setState on an unmounted component or apply stale responses.
+  const { signal } = useAbortController();
+
   const fetchDisputes = useCallback(async (p = page) => {
     setLoading(true);
     setError(null);
@@ -218,16 +223,18 @@ function DisputesContent() {
       const params = { page: p, limit: pageSize };
       if (statusFilter) params.status = statusFilter;
       if (studentFilter.trim()) params.studentId = studentFilter.trim();
-      const res = await getDisputes(params);
+      const res = await getDisputes(params, { signal });
       setDisputes(res.data.disputes || []);
       setTotalPages(res.data.pagination?.totalPages || 1);
       setTotalCount(res.data.pagination?.total || 0);
     } catch (err) {
+      // Silently ignore requests cancelled on unmount.
+      if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
       setError(getErrorMessage(err.response?.data?.code, err.response?.data?.error) || t("disputes.failedToLoad"));
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, statusFilter, studentFilter, t]);
+  }, [page, pageSize, statusFilter, studentFilter, t, signal]);
 
   useEffect(() => { fetchDisputes(page); }, [page, pageSize, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 

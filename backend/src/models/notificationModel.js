@@ -5,7 +5,16 @@ const mongoose = require('mongoose');
 /**
  * Notification model — stores in-app notifications scoped to a school (tenant).
  *
- * TTL: Documents expire automatically after 90 days via a MongoDB TTL index on createdAt.
+ * TTL: Documents expire automatically after 30 days via a MongoDB TTL index on createdAt.
+ * (Issue #362 — "Retain the last 30 days of notifications per user")
+ *
+ * Supported notification types (Issue #362):
+ *   - payment.confirmed  — a payment has been confirmed on-chain
+ *   - payment.failed     — payment verification failed
+ *   - dispute.created    — a new dispute was opened
+ *   - dispute.updated    — a dispute's status changed
+ *   - report.ready       — a report has been generated and is ready for download
+ *   - system.alert       — a system-wide alert (e.g. maintenance, sync lag)
  *
  * Security:
  *   - schoolId is the tenant scope; all queries MUST include it.
@@ -22,7 +31,14 @@ const notificationSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ['payment.confirmed', 'payment.failed', 'dispute.created', 'dispute.updated'],
+      enum: [
+        'payment.confirmed',
+        'payment.failed',
+        'dispute.created',
+        'dispute.updated',
+        'report.ready',
+        'system.alert',
+      ],
       required: true,
     },
 
@@ -63,7 +79,7 @@ const notificationSchema = new mongoose.Schema(
       default: null,
     },
 
-    // TTL field — MongoDB will expire documents 90 days after createdAt
+    // TTL field — MongoDB will expire documents 30 days after createdAt
     createdAt: {
       type: Date,
       default: Date.now,
@@ -82,8 +98,8 @@ const notificationSchema = new mongoose.Schema(
   }
 );
 
-// TTL index: automatically remove notifications older than 90 days
-notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+// TTL index: automatically remove notifications older than 30 days (Issue #362)
+notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
 
 // Compound indexes for common access patterns
 notificationSchema.index({ schoolId: 1, createdAt: -1 });

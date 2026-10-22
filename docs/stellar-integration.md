@@ -14,6 +14,7 @@ StellarEduPay uses the **Stellar Horizon API** to read blockchain transactions �
 - [How verifyTransaction Works](#how-verifytransaction-works)
 - [Fee Validation](#fee-validation)
 - [Confirmation Threshold & Finality State Machine](#confirmation-threshold--finality-state-machine)
+- [Submit Path — SUBMITTED Status & Ledger Finality Polling](#submit-path--submitted-status--ledger-finality-polling)
 - [Fraud & Anomaly Detection](#fraud--anomaly-detection)
 - [Retry Behaviour](#retry-behaviour)
 - [Verifying a Payment Independently](#verifying-a-payment-independently)
@@ -458,6 +459,35 @@ FINALIZATION_THRESHOLD=10   # default — 5x CONFIRMATION_THRESHOLD when unset; 
 Payments that have not yet reached `confirmed` are swept by `finalizeConfirmedPayments(schoolId)`, run periodically, which advances each non-terminal payment (`detected`/`pending` → `confirmed` → `finalized`) using the same idempotent machinery — safe to call repeatedly or concurrently for the same school.
 
 Unit tests for the state machine (including re-poll idempotency) live in `backend/tests/paymentConfirmationStateMachine.test.js` and `backend/tests/confirmationStateRepollAndCrossSchoolCollision.test.js`.
+
+---
+
+## Submit Path — SUBMITTED Status & Ledger Finality Polling
+
+When a parent submits a signed XDR via `POST /api/payments/submit`, the payment
+moves through an additional intermediate status:
+
+```
+PENDING → SUBMITTED → SUCCESS
+                    ↘ FAILED  (TX_FAILED_ON_CHAIN / FINALITY_TIMEOUT / STELLAR_NETWORK_ERROR)
+```
+
+`SUBMITTED` is persisted **before** the Horizon broadcast so a server crash is
+recoverable. After a successful broadcast, `pollForLedgerInclusion` polls Horizon
+with exponential backoff until the transaction appears in a closed ledger at
+`CONFIRMED` depth or above — only then does the status advance to `SUCCESS`.
+
+**Expected confirmation latency:**
+
+| Percentile | Latency |
+|------------|---------|
+| P50 | 5–10 s |
+| P99 | 30–45 s |
+| Timeout | 5 min (configurable) |
+
+For the complete polling algorithm, failure reason codes, operator runbook for
+`FINALITY_TIMEOUT` payments, and tuning guidance see
+**[`docs/stellar-finality-policy.md`](stellar-finality-policy.md)**.
 
 ---
 
