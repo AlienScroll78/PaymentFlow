@@ -16,6 +16,7 @@ const en = {
     auditLogs: "Audit Logs",
     disputes: "Disputes",
     webhooks: "Webhooks",
+  deadLetter: "Dead-Letter Queue",
     sidebarAria: "Sidebar navigation",
     section: "Navigation",
     language: "Language",
@@ -26,6 +27,8 @@ const en = {
     openMenu: "Open menu",
     closeMenu: "Close menu",
     adminSection: "Admin",
+    adminRoleBadgeAria: "You are signed in as an administrator",
+    adminOnlyLinkAria: "Requires admin access",
   },
 
   actions: {
@@ -66,13 +69,47 @@ const en = {
     back: "Back",
   },
 
+  pagination: {
+    label: "Pagination",
+    firstPage: "First page",
+    lastPage: "Last page",
+    previousPage: "Previous page",
+    nextPage: "Next page",
+    firstPageAria: "Go to first page of {{total}}",
+    lastPageAria: "Go to last page of {{total}}",
+    previousPageAria: "Go to previous page (page {{page}} of {{total}})",
+    nextPageAria: "Go to next page (page {{page}} of {{total}})",
+    pageAria: "Page {{page}} of {{total}}",
+    ellipsis: "More pages",
+    rangeOf: "{{start}}–{{end}} of {{total}} {itemLabel}",
+    shortcutHint: "Press g followed by a number to jump to that page",
+  },
+
   time: {
     never: "Never",
     justNow: "Just now",
     minutesAgo: "{{mins}}m ago",
     hoursAgo: "{{hrs}}h ago",
     daysAgo: "{{days}}d ago",
-    pageOf: "Page {{page}} of {{total}}",
+    pageOf: "{{page}} / {{total}}",
+  },
+
+  pagination: {
+    rangeOf: "{{start}}–{{end}} of {{total}}",
+    noResults: "No results",
+    rowsPerPage: "Rows per page",
+    rowsPerPageAria: "Rows per page",
+    navAria: "Pagination",
+    firstPage: "First page",
+    lastPage: "Last page",
+  },
+
+  networkStatus: {
+    offline: "You are offline. Payment submission is disabled.",
+    offlineAria: "Network connectivity lost",
+    backOnline: "Back online \u2014 refreshing\u2026",
+    staleWarning: "Your connection was interrupted. Data may be stale.",
+    offlineSubmitLabel: "Offline \u2014 submission disabled",
   },
 
   status: {
@@ -268,6 +305,12 @@ const en = {
     noPayments: "No payments recorded yet.",
     raiseDispute: "Raise Dispute",
     disputeSubmitted: "Dispute submitted",
+    sortBy: "Sort by:",
+    colDate: "Date",
+    colAmount: "Amount",
+    colStatus: "Status",
+    txCount: "{{count}} transaction(s)",
+    txRowAria: "{{amount}} {{asset}}, status: {{status}}",
   },
 
   verifyPayment: {
@@ -278,6 +321,7 @@ const en = {
     verifying: "Verifying…",
     submit: "Verify Transaction",
     verificationFailed: "Verification failed. Check the transaction hash and try again.",
+    alreadyCreated: "This payment has already been created. No duplicate was recorded.",
     checkNetworkStatus: "Check Stellar Network Status ↗",
     transactionFound: "Transaction Found",
     amount: "Amount",
@@ -642,6 +686,13 @@ const en = {
     emptyNone: "No students have been registered yet.",
     rangeOf: "{{start}}–{{end}} of {{total}} students",
     paginationAria: "Student list pagination",
+    densityCompact: "Compact",
+    densityDefault: "Default",
+    densityComfortable: "Comfortable",
+    densityLabel: "Row density",
+    expandRow: "Expand row details",
+    collapseRow: "Collapse row details",
+    expandedDetails: "Details",
   },
   fees: {
     eyebrow: "Admin",
@@ -742,12 +793,37 @@ const en = {
     submsg: "Payment actions are disabled. Data will refresh automatically when you reconnect.",
   },
 
+  blockchain: {
+    statusSubmitted: 'Confirming on-chain',
+    statusSubmittedSub: 'Waiting for blockchain finality',
+    statusPending: 'Awaiting submission',
+    statusSuccess: 'Confirmed',
+    statusSuccessSub: 'Finalized on Stellar',
+    statusFailed: 'Failed',
+    statusFailedSub: 'Transaction rejected',
+    statusDisputed: 'Disputed',
+    statusRefunded: 'Refunded',
+    statusInvalid: 'Invalid',
+    viewOnExplorer: 'View on Stellar Explorer',
+    explorerAriaLabel: 'View transaction {{hash}} on Stellar Explorer (opens in new tab)',
+  },
+
+  errorAlert: {
+    permanentLabel: "Permanent error",
+    attemptsCount: "Attempt {{attempts}} of {{max}}",
+    retryAria: "Retry the failed request",
+    dismissAria: "Dismiss error",
+  },
+
   errorBoundary: {
     title: "Something went wrong",
+    sectionTitle: "Something went wrong in {{section}}",
     body: "An unexpected error occurred. You can try reloading the page or go back to safety.",
     reload: "Reload page",
     goBack: "Go back",
     goHome: "Go home",
+    retry: "Try again",
+    correlationId: "Reference: {{id}}",
   },
 
   paymentPlan: {
@@ -800,6 +876,98 @@ const en = {
     saveChanges: "Save Changes",
     nameRequired: "Name is required",
     parentEmailInvalid: "Enter a valid email address",
+  },
+
+  // ── Issue #106: Transaction Detail ─────────────────────────────────────────
+  transactionDetail: {
+    title: "Transaction Detail",
+    summaryAria: "Transaction summary",
+    detailsAria: "Transaction details",
+    actionsAria: "Transaction actions",
+    amount: "Amount",
+    status: "Status",
+    date: "Date",
+    validation: "Validation",
+    sectionParties: "Counterparties",
+    sectionTechnical: "Technical Details",
+    sectionReconciliation: "Reconciliation & Audit",
+    studentId: "Student ID",
+    source: "From (wallet)",
+    destination: "To (wallet)",
+    memo: "Memo",
+    txHash: "Transaction Hash",
+    copyHash: "Copy transaction hash",
+    asset: "Asset",
+    ledger: "Ledger",
+    feeCharged: "Network Fee",
+    syncedAt: "Synced At",
+    recordedBy: "Recorded By",
+    recordId: "Record ID",
+    notes: "Notes",
+  },
+
+
+  // ── Issue #107: Filter Chips ─────────────────────────────────────────────────
+  filterChips: {
+    activeLabel: "Filters",
+    activeFiltersAria: "Active filters",
+    chipListAria: "Active filter list",
+    activeFilterCount_one: "{{count}} active filter",
+    activeFilterCount_other: "{{count}} active filters",
+    removeAria: "Remove {{label}}: {{value}}",
+    clearAll: "Clear all",
+    clearAllAria: "Clear all filters",
+  },
+
+  // ── Issue #108: Confirm Dialog ───────────────────────────────────────────────
+  confirmDialog: {
+    typeToConfirm: "Type",
+    typeToConfirmSuffix: "to confirm",
+    typingMatched: "Confirmed — you may proceed",
+  },
+
+  // ── Issue #109: Role-aware nav ───────────────────────────────────────────────
+  // (keys added to the existing nav section; listed here for clarity)
+  // nav.adminRoleBadgeAria and nav.adminOnlyLinkAria are added inline below.
+
+
+  exportJob: {
+    queued: "Export queued — preparing your report…",
+    running: "Generating report… {{progress}}%",
+    runningSubtext: "You can navigate away and return to download when ready.",
+    completed: "Report ready to download",
+    completedExpiry: "Available until {{time}}",
+    download: "Download",
+    failed: "Export failed",
+    retry: "Retry",
+    expired: "Download link has expired.",
+    expiredAction: "Generate a new report to download.",
+    generateNew: "Generate New Report",
+    dismiss: "Dismiss",
+  },
+
+  dateRange: {
+    timezone: "Timezone",
+    timezoneIndicator: "Showing times in {{tz}}",
+    presetToday: "Today",
+    presetYesterday: "Yesterday",
+    presetLast7: "Last 7 days",
+    presetLast30: "Last 30 days",
+    presetThisMonth: "This month",
+    presetLastMonth: "Last month",
+    startDate: "Start date",
+    endDate: "End date",
+    clearDates: "Clear dates",
+    invalidRange: "End date must be after start date",
+    futureDatesWarning: "Future dates selected",
+    applyRange: "Apply",
+    customRange: "Custom range",
+  },
+
+  sessionExpiry: {
+    warningToast: "Your session will expire in {{minutes}} minutes. Please save your work.",
+    draftRestored: "Your draft was restored from before your session expired.",
+    discardDraft: "Discard",
   },
 };
 

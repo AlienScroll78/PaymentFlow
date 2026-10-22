@@ -5,6 +5,7 @@ import VerifyPayment from "../../components/VerifyPayment";
 import SseDegradedBanner from "../../components/SseDegradedBanner";
 import { usePaymentEvents } from "../../hooks/usePaymentEvents";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
+import { useAdminAuthContext } from "../../hooks/AdminAuthContext";
 import { useTranslation } from "react-i18next";
 
 // #1344 — shareable, bookmarkable payment status URL. Pre-fills the student
