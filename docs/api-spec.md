@@ -81,17 +81,17 @@ To protect against oversized payload attacks, the API enforces JSON body size li
 
 | Endpoint | Limit |
 |----------|-------|
-| All endpoints (default) | `10kb` (configurable via `MAX_BODY_SIZE` env var) |
-| `POST /api/students/bulk` | `1mb` |
+| JSON endpoints | `50kb` |
+| Multipart CSV imports | `5mb` per uploaded CSV file |
 
 Requests that exceed the applicable limit are rejected before reaching any handler:
 
 ```json
 HTTP 413
-{ "error": "request entity too large" }
+{ "errors": [{ "field": "body", "message": "Request body must not exceed 50KB" }], "code": "PAYLOAD_TOO_LARGE" }
 ```
 
-The global limit can be tuned via the `MAX_BODY_SIZE` environment variable (e.g. `MAX_BODY_SIZE=50kb`). The bulk import override is fixed at `1mb` regardless of `MAX_BODY_SIZE`.
+The JSON limit is fixed. Multipart imports use the streaming file-size limit and do not use the JSON parser.
 
 ---
 
