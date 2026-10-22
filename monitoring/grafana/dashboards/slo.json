@@ -1,590 +1,65 @@
 {
-  "title": "PaymentFlow — SLO Dashboard",
-  "uid": "paymentflow-slo",
-  "description": "Service Level Objectives: API availability (99.9%), payment creation latency P95 < 2s, payment polling P95 < 500ms. Error budget burn rate tracking for the 30-day rolling window.",
+  "title": "PaymentFlow - SLOs and Error Budgets",
+  "uid": "paymentflow-slos",
   "schemaVersion": 36,
   "version": 1,
-  "refresh": "30s",
-  "time": { "from": "now-24h", "to": "now" },
-  "tags": ["slo", "reliability", "error-budget"],
-  "templating": {
-    "list": []
-  },
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "tags": ["slo", "error-budget", "payments"],
   "panels": [
     {
       "id": 1,
-      "type": "text",
-      "title": "",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 2 },
-      "options": {
-        "mode": "markdown",
-        "content": "## SLO Summary — 30-day rolling window\n\nTargets: **API Availability ≥ 99.9%** · **Payment Creation P95 < 2s** · **Payment Polling P95 < 500ms**\n\nError budget (99.9% availability) = **43.8 minutes / month** of allowed downtime."
-      }
-    },
-    {
-      "id": 10,
-      "title": "API Availability — Current (30d)",
-      "description": "30-day rolling API availability. Target ≥ 99.9%. Red = SLO breach.",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 2, "w": 6, "h": 4 },
-      "targets": [
-        {
-          "expr": "job:http_availability:ratio_rate30d * 100",
-          "legendFormat": "Availability %"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 3,
-          "min": 99,
-          "max": 100,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red",    "value": 0 },
-              { "color": "yellow", "value": 99.5 },
-              { "color": "green",  "value": 99.9 }
-            ]
-          },
-          "mappings": []
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "background"
-      }
+      "title": "API Availability",
+      "description": "30-day availability target: 99.9%",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+      "targets": [{ "expr": "1 - sum(increase(http_request_duration_seconds_count{status=~\"5..\"}[30d])) / clamp_min(sum(increase(http_request_duration_seconds_count[30d])), 1)", "legendFormat": "availability" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "yellow", "value": 0.999 }, { "color": "green", "value": 0.9995 }] } } }
     },
     {
-      "id": 11,
-      "title": "Error Budget Remaining (30d)",
-      "description": "Fraction of the 30-day error budget remaining. 100% = full budget; 0% = exhausted. Budget = 43.8 min/month for 99.9% SLO.",
-      "type": "gauge",
-      "gridPos": { "x": 6, "y": 2, "w": 6, "h": 4 },
-      "targets": [
-        {
-          "expr": "clamp(job:availability_error_budget_remaining:ratio_rate30d * 100, 0, 100)",
-          "legendFormat": "Budget Remaining %"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 1,
-          "min": 0,
-          "max": 100,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red",    "value": 0 },
-              { "color": "orange", "value": 10 },
-              { "color": "yellow", "value": 25 },
-              { "color": "green",  "value": 50 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "showThresholdLabels": true,
-        "showThresholdMarkers": true
-      }
-    },
-    {
-      "id": 12,
-      "title": "Burn Rate (1h window)",
-      "description": "How fast the error budget is being consumed right now. 1x = sustainable pace; 2x = slow burn alert; 5x = fast burn alert.",
-      "type": "stat",
-      "gridPos": { "x": 12, "y": 2, "w": 6, "h": 4 },
-      "targets": [
-        {
-          "expr": "job:availability_burn_rate:rate1h",
-          "legendFormat": "Burn Rate (1h)"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green",  "value": 0 },
-              { "color": "yellow", "value": 2 },
-              { "color": "orange", "value": 5 },
-              { "color": "red",    "value": 10 }
-            ]
-          },
-          "mappings": []
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 13,
-      "title": "Burn Rate (5m window)",
-      "description": "Short-window burn rate for fast incident detection. Spikes here trigger the critical AvailabilitySLOFastBurn alert.",
-      "type": "stat",
-      "gridPos": { "x": 18, "y": 2, "w": 6, "h": 4 },
-      "targets": [
-        {
-          "expr": "job:availability_burn_rate:rate5m",
-          "legendFormat": "Burn Rate (5m)"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green",  "value": 0 },
-              { "color": "yellow", "value": 2 },
-              { "color": "orange", "value": 5 },
-              { "color": "red",    "value": 10 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
-      }
-    },
-    {
-      "id": 20,
-      "type": "text",
-      "title": "",
-      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 1 },
-      "options": {
-        "mode": "markdown",
-        "content": "### SLO 1 — API Availability (target 99.9%)"
-      }
-    },
-    {
-      "id": 21,
-      "title": "Availability — 30-day Rolling (5m resolution)",
-      "description": "Rolling 30-day API availability computed from HTTP response codes. The red dashed line marks the 99.9% SLO target.",
+      "id": 2,
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 7, "w": 24, "h": 8 },
-      "targets": [
-        {
-          "expr": "job:http_availability:ratio_rate5m * 100",
-          "legendFormat": "Availability % (5m)"
-        },
-        {
-          "expr": "job:http_availability:ratio_rate1h * 100",
-          "legendFormat": "Availability % (1h)"
-        },
-        {
-          "expr": "vector(99.9)",
-          "legendFormat": "SLO target (99.9%)"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": { "lineWidth": 2 },
-          "min": 99
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "SLO target (99.9%)" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Availability % (5m)" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Availability % (1h)" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
-            ]
-          }
-        ]
-      }
+      "title": "API Latency p95",
+      "description": "30-day target: below 1 second",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[10m])) by (le))", "legendFormat": "p95" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } }
     },
     {
-      "id": 22,
-      "title": "Error Budget Burn-Down (30-day)",
-      "description": "Burn rate over 1-hour and 6-hour windows. Alert fires at 2x (1h) and 5x (5m). Values above 1x mean the budget is being consumed faster than the sustainable pace.",
+      "id": 3,
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "job:availability_burn_rate:rate1h",
-          "legendFormat": "Burn Rate (1h)"
-        },
-        {
-          "expr": "job:availability_burn_rate:rate6h",
-          "legendFormat": "Burn Rate (6h)"
-        },
-        {
-          "expr": "vector(2)",
-          "legendFormat": "2x — slow burn alert threshold"
-        },
-        {
-          "expr": "vector(5)",
-          "legendFormat": "5x — fast burn alert threshold"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": { "lineWidth": 2 }
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "2x — slow burn alert threshold" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "5x — fast burn alert threshold" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          }
-        ]
-      }
+      "title": "Transaction Queue Age",
+      "description": "30-day target: oldest transaction below 60 seconds",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 },
+      "targets": [{ "expr": "transaction_queue_oldest_age_seconds", "legendFormat": "oldest age" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 60 }] } } }
     },
     {
-      "id": 23,
-      "title": "Error Budget Remaining % (30-day rolling)",
-      "description": "Remaining fraction of the monthly 43.8-minute error budget. Below 25% = yellow; below 10% = red.",
+      "id": 4,
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "clamp(job:availability_error_budget_remaining:ratio_rate30d * 100, 0, 100)",
-          "legendFormat": "Budget Remaining %"
-        },
-        {
-          "expr": "vector(25)",
-          "legendFormat": "25% warning threshold"
-        },
-        {
-          "expr": "vector(10)",
-          "legendFormat": "10% critical threshold"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": { "lineWidth": 2 },
-          "min": 0,
-          "max": 100
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "25% warning threshold" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "10% critical threshold" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          }
-        ]
-      }
+      "title": "Webhook Success",
+      "description": "30-day target: 99.5% delivered",
+      "gridPos": { "x": 0, "y": 6, "w": 8, "h": 6 },
+      "targets": [{ "expr": "sum(increase(webhook_delivery_total{status=~\"success|delivered\"}[30d])) / clamp_min(sum(increase(webhook_delivery_total[30d])), 1)", "legendFormat": "success" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "yellow", "value": 0.995 }, { "color": "green", "value": 0.999 }] } } }
     },
     {
-      "id": 30,
-      "type": "text",
-      "title": "",
-      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 1 },
-      "options": {
-        "mode": "markdown",
-        "content": "### SLO 2 — Payment Creation Latency (target P95 < 2s)"
-      }
-    },
-    {
-      "id": 31,
-      "title": "Payment Creation P95 Latency",
-      "description": "P95 latency for POST /api/payments/verify — the payment creation/verification endpoint. Target < 2 seconds.",
+      "id": 5,
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "job:payment_creation_latency_p95:rate5m",
-          "legendFormat": "P95 (5m)"
-        },
-        {
-          "expr": "job:payment_creation_latency_p95:rate1h",
-          "legendFormat": "P95 (1h)"
-        },
-        {
-          "expr": "vector(2)",
-          "legendFormat": "SLO target (2s)"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": { "lineWidth": 2 }
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "SLO target (2s)" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          }
-        ]
-      }
+      "title": "Reconciliation Lag",
+      "description": "30-day target: below 15 minutes. Requires reconciliation_lag_seconds instrumentation.",
+      "gridPos": { "x": 8, "y": 6, "w": 8, "h": 6 },
+      "targets": [{ "expr": "reconciliation_lag_seconds", "legendFormat": "lag" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 900 }] } } }
     },
     {
-      "id": 32,
-      "title": "Payment Creation Latency — Current P50/P95/P99 (stat)",
-      "description": "Current snapshot of payment creation latency percentiles.",
-      "type": "stat",
-      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/verify.*\"}[5m])) by (le))",
-          "legendFormat": "P50"
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/verify.*\"}[5m])) by (le))",
-          "legendFormat": "P95"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/verify.*\"}[5m])) by (le))",
-          "legendFormat": "P99"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green",  "value": 0 },
-              { "color": "yellow", "value": 1 },
-              { "color": "red",    "value": 2 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "value",
-        "orientation": "horizontal"
-      }
-    },
-    {
-      "id": 40,
-      "type": "text",
-      "title": "",
-      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 },
-      "options": {
-        "mode": "markdown",
-        "content": "### SLO 3 — Payment Status Polling Latency (target P95 < 500ms)"
-      }
-    },
-    {
-      "id": 41,
-      "title": "Payment Polling P95 Latency",
-      "description": "P95 latency for GET /api/payments/* and /api/students/* status polling. Target < 500ms.",
+      "id": 6,
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 33, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "job:payment_polling_latency_p95:rate5m",
-          "legendFormat": "P95 (5m)"
-        },
-        {
-          "expr": "job:payment_polling_latency_p95:rate1h",
-          "legendFormat": "P95 (1h)"
-        },
-        {
-          "expr": "vector(0.5)",
-          "legendFormat": "SLO target (500ms)"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": { "lineWidth": 2 }
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "SLO target (500ms)" },
-            "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash" } },
-              { "id": "custom.lineWidth", "value": 1 }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "id": 42,
-      "title": "Payment Polling Latency — Current P50/P95/P99 (stat)",
-      "description": "Current snapshot of payment polling latency percentiles.",
-      "type": "stat",
-      "gridPos": { "x": 12, "y": 33, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/.*|.*/students/.*\"}[5m])) by (le))",
-          "legendFormat": "P50"
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/.*|.*/students/.*\"}[5m])) by (le))",
-          "legendFormat": "P95"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{route=~\".*/payments/.*|.*/students/.*\"}[5m])) by (le))",
-          "legendFormat": "P99"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green",  "value": 0 },
-              { "color": "yellow", "value": 0.25 },
-              { "color": "red",    "value": 0.5 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "value",
-        "orientation": "horizontal"
-      }
-    },
-    {
-      "id": 50,
-      "type": "text",
-      "title": "",
-      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 },
-      "options": {
-        "mode": "markdown",
-        "content": "### SLO Compliance Table — 30-day rolling"
-      }
-    },
-    {
-      "id": 51,
-      "title": "SLO Compliance — Is availability target met? (1 = yes, 0 = breach)",
-      "description": "1 = SLO met, 0 = SLO in breach over the 30-day window.",
-      "type": "stat",
-      "gridPos": { "x": 0, "y": 42, "w": 8, "h": 4 },
-      "targets": [
-        {
-          "expr": "clamp_min(floor(job:http_availability:ratio_rate30d / 0.999), 0)",
-          "legendFormat": "Availability SLO"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "BREACH", "color": "red" } } },
-            { "type": "value", "options": { "1": { "text": "MET", "color": "green" } } }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red",   "value": 0 },
-              { "color": "green", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
-    },
-    {
-      "id": 52,
-      "title": "SLO Compliance — Is payment creation latency target met?",
-      "description": "1 = SLO met (P95 < 2s), 0 = breach.",
-      "type": "stat",
-      "gridPos": { "x": 8, "y": 42, "w": 8, "h": 4 },
-      "targets": [
-        {
-          "expr": "clamp_min(floor((2 - job:payment_creation_latency_p95:rate30d) / 2), 0)",
-          "legendFormat": "Creation Latency SLO"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "BREACH", "color": "red" } } },
-            { "type": "value", "options": { "1": { "text": "MET", "color": "green" } } }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red",   "value": 0 },
-              { "color": "green", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
-    },
-    {
-      "id": 53,
-      "title": "SLO Compliance — Is payment polling latency target met?",
-      "description": "1 = SLO met (P95 < 500ms), 0 = breach.",
-      "type": "stat",
-      "gridPos": { "x": 16, "y": 42, "w": 8, "h": 4 },
-      "targets": [
-        {
-          "expr": "clamp_min(floor((0.5 - job:payment_polling_latency_p95:rate30d) / 0.5), 0)",
-          "legendFormat": "Polling Latency SLO"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "BREACH", "color": "red" } } },
-            { "type": "value", "options": { "1": { "text": "MET", "color": "green" } } }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red",   "value": 0 },
-              { "color": "green", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+      "title": "Payment Error Budget Burn",
+      "description": "Short-window 5xx ratio for payment routes; target is 99.9% availability.",
+      "gridPos": { "x": 16, "y": 6, "w": 8, "h": 6 },
+      "targets": [{ "expr": "sum(rate(http_request_duration_seconds_count{status=~\"5..\",route=~\".*/payments.*\"}[5m])) / clamp_min(sum(rate(http_request_duration_seconds_count{route=~\".*/payments.*\"}[5m])), 0.001)", "legendFormat": "5xx burn" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 0.05 }] } } }
     }
   ]
 }

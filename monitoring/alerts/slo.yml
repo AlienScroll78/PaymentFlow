@@ -1,215 +1,84 @@
 groups:
-  # ── Recording rules: SLI windows ────────────────────────────────────────
-  # Pre-compute the rolling good/total request ratios used by both the
-  # error-budget and burn-rate alert rules. Recording rules keep the alert
-  # expressions simple and fast to evaluate.
-  - name: slo_recording_rules
+  - name: paymentflow_slo_alerts
     interval: 60s
     rules:
-      # ── SLO 1: API Availability (target 99.9%) ───────────────────────────
-      # "good" = any non-5xx HTTP response; "total" = all responses.
-      - record: job:http_requests_total:rate5m
-        expr: sum(rate(http_request_duration_seconds_count[5m]))
-
-      - record: job:http_errors_total:rate5m
-        expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m]))
-
-      - record: job:http_availability:ratio_rate5m
-        expr: >
-          1 - (
-            job:http_errors_total:rate5m
-            /
-            clamp_min(job:http_requests_total:rate5m, 0.001)
-          )
-
-      # 1-hour window for fast burn detection
-      - record: job:http_availability:ratio_rate1h
-        expr: >
-          1 - (
-            sum(rate(http_request_duration_seconds_count{status=~"5.."}[1h]))
-            /
-            clamp_min(sum(rate(http_request_duration_seconds_count[1h])), 0.001)
-          )
-
-      # 6-hour window for slow burn
-      - record: job:http_availability:ratio_rate6h
-        expr: >
-          1 - (
-            sum(rate(http_request_duration_seconds_count{status=~"5.."}[6h]))
-            /
-            clamp_min(sum(rate(http_request_duration_seconds_count[6h])), 0.001)
-          )
-
-      # 1-day and 30-day windows for error budget burn-down
-      - record: job:http_availability:ratio_rate1d
-        expr: >
-          1 - (
-            sum(rate(http_request_duration_seconds_count{status=~"5.."}[1d]))
-            /
-            clamp_min(sum(rate(http_request_duration_seconds_count[1d])), 0.001)
-          )
-
-      - record: job:http_availability:ratio_rate30d
-        expr: >
-          1 - (
-            sum(rate(http_request_duration_seconds_count{status=~"5.."}[30d]))
-            /
-            clamp_min(sum(rate(http_request_duration_seconds_count[30d])), 0.001)
-          )
-
-      # ── SLO 2: Payment creation latency P95 < 2s ────────────────────────
-      - record: job:payment_creation_latency_p95:rate5m
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/verify.*"}[5m])) by (le)
-          )
-
-      - record: job:payment_creation_latency_p95:rate1h
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/verify.*"}[1h])) by (le)
-          )
-
-      - record: job:payment_creation_latency_p95:rate30d
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/verify.*"}[30d])) by (le)
-          )
-
-      # ── SLO 3: Payment status polling P95 < 500ms ───────────────────────
-      - record: job:payment_polling_latency_p95:rate5m
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/.*|.*/students/.*"}[5m])) by (le)
-          )
-
-      - record: job:payment_polling_latency_p95:rate1h
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/.*|.*/students/.*"}[1h])) by (le)
-          )
-
-      - record: job:payment_polling_latency_p95:rate30d
-        expr: >
-          histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket{route=~".*/payments/.*|.*/students/.*"}[30d])) by (le)
-          )
-
-      # ── Error budget remaining (availability SLO 99.9%) ─────────────────
-      # Error budget = 1 - SLO target = 0.001 = 43.8 min/month
-      # Remaining fraction = (current error rate / (1 - SLO_TARGET))
-      # A value of 1.0 = full budget remaining; 0.0 = budget exhausted.
-      - record: job:availability_error_budget_remaining:ratio_rate30d
-        expr: >
-          (job:http_availability:ratio_rate30d - 0.999)
-          /
-          (1 - 0.999)
-
-      # ── Burn rate (how fast the error budget is being consumed) ──────────
-      # burn_rate = error_rate_current / error_budget_rate
-      # error_budget_rate for 99.9% SLO = 0.001 / (30d in seconds) * window
-      # Simplified: burn_rate = (1 - availability) / (1 - 0.999) = (1 - avail) / 0.001
-      - record: job:availability_burn_rate:rate1h
-        expr: >
-          (1 - job:http_availability:ratio_rate1h) / 0.001
-
-      - record: job:availability_burn_rate:rate5m
-        expr: >
-          (1 - job:http_availability:ratio_rate5m) / 0.001
-
-      - record: job:availability_burn_rate:rate6h
-        expr: >
-          (1 - job:http_availability:ratio_rate6h) / 0.001
-
-  # ── SLO Alert rules ───────────────────────────────────────────────────────
-  - name: slo_alerts
-    interval: 60s
-    rules:
-      # ── SLO 1: Availability — Fast burn (5x in 5-min window) ─────────────
-      # A 5x burn rate over 5 minutes means the full 30-day error budget will
-      # be consumed in 6 days if the current rate is sustained.
-      # 5x burn rate on a 99.9% SLO = error rate of 0.5% over 5 minutes.
-      - alert: AvailabilitySLOFastBurn
-        expr: job:availability_burn_rate:rate5m > 5
-        for: 2m
+      - alert: ApiAvailabilitySLOBurn
+        expr: |
+          (
+            1 - sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m]))
+              / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 0.001)
+          ) < 0.999
+        for: 10m
         labels:
           severity: critical
-          slo: availability
-          slo_target: "99.9"
+          slo: api-availability
+          owner: api
         annotations:
-          summary: "Availability SLO fast burn — budget burning at {{ $value | printf \"%.1f\" }}x rate"
-          description: >
-            The availability error budget is burning at {{ $value | printf "%.1f" }}x
-            the sustainable rate (5x threshold) over the last 5 minutes.
-            At this rate the full 30-day budget (43.8 min) will be exhausted in
-            {{ printf "%.0f" (div 43.8 $value) }} minutes.
-            Check http_request_duration_seconds_count{status=~"5.."} for
-            the root cause.
+          summary: "API availability is below the 99.9% SLO"
+          runbook: "docs/runbooks/slo-burn-rate.md#api-availability"
+          description: "The API is consuming its 30-day availability error budget."
 
-      # ── SLO 1: Availability — Slow burn (2x in 1-hour window) ─────────────
-      # A 2x burn rate over 1 hour is less acute but indicates sustained
-      # degradation that will exhaust the monthly budget in ~15 days.
-      - alert: AvailabilitySLOSlowBurn
-        expr: job:availability_burn_rate:rate1h > 2
+      - alert: ApiLatencySLOBurn
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[10m])) by (le)) > 1
+        for: 10m
+        labels:
+          severity: warning
+          slo: api-latency
+          owner: api
+        annotations:
+          summary: "API p95 latency is above the 1 second SLO"
+          runbook: "docs/runbooks/slo-burn-rate.md#api-latency"
+          description: "API p95 latency has exceeded the target for 10 minutes."
+
+      - alert: TransactionQueueAgeSLOBurn
+        expr: transaction_queue_oldest_age_seconds > 60
+        for: 10m
+        labels:
+          severity: warning
+          slo: queue-age
+          owner: payments
+        annotations:
+          summary: "Transaction queue age is above the 60 second SLO"
+          runbook: "docs/runbooks/slo-burn-rate.md#queue-age"
+          description: "The oldest queued transaction has exceeded the queue-age target."
+
+      - alert: WebhookSuccessSLOBurn
+        expr: |
+          sum(rate(webhook_delivery_total{status=~"success|delivered"}[15m]))
+            / clamp_min(sum(rate(webhook_delivery_total[15m])), 0.001) < 0.995
+        for: 15m
+        labels:
+          severity: warning
+          slo: webhook-success
+          owner: integrations
+        annotations:
+          summary: "Webhook delivery success is below the 99.5% SLO"
+          runbook: "docs/runbooks/slo-burn-rate.md#webhook-success"
+          description: "Webhook delivery failures are consuming the integration error budget."
+
+      - alert: ReconciliationLagSLOBurn
+        expr: reconciliation_lag_seconds > 900
+        for: 15m
+        labels:
+          severity: warning
+          slo: reconciliation-lag
+          owner: finance
+        annotations:
+          summary: "Reconciliation lag is above the 15 minute SLO"
+          runbook: "docs/runbooks/slo-burn-rate.md#reconciliation-lag"
+          description: "Reconciliation has not caught up within the target window."
+
+      - alert: PaymentErrorBudgetFastBurn
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status=~"5..",route=~".*/payments.*"}[5m]))
+            / clamp_min(sum(rate(http_request_duration_seconds_count{route=~".*/payments.*"}[5m])), 0.001) > 0.05
         for: 5m
         labels:
-          severity: warning
-          slo: availability
-          slo_target: "99.9"
+          severity: critical
+          slo: payment-availability
+          owner: payments
         annotations:
-          summary: "Availability SLO slow burn — budget burning at {{ $value | printf \"%.1f\" }}x rate"
-          description: >
-            The availability error budget is burning at {{ $value | printf "%.1f" }}x
-            the sustainable rate (2x threshold) over the last 1 hour.
-            At this rate the budget will be exhausted in roughly
-            {{ printf "%.0f" (div 720 $value) }} hours. Investigate
-            before this escalates to a critical burn.
-
-      # ── SLO 1: Availability — Budget exhausted (<5% remaining) ───────────
-      - alert: AvailabilityErrorBudgetLow
-        expr: job:availability_error_budget_remaining:ratio_rate30d < 0.05
-        for: 0m
-        labels:
-          severity: warning
-          slo: availability
-        annotations:
-          summary: "Availability error budget below 5% for the month"
-          description: >
-            Only {{ $value | printf "%.1f%%" }} of the monthly availability error
-            budget remains. Remaining budget: approximately
-            {{ printf "%.1f" (mul $value 43.8) }} minutes.
-            Reliability work should be prioritised over new features until
-            the budget recovers at the start of the next SLO window.
-
-      # ── SLO 2: Payment creation latency P95 > 2s ────────────────────────
-      - alert: PaymentCreationLatencySLOBreach
-        expr: job:payment_creation_latency_p95:rate1h > 2
-        for: 5m
-        labels:
-          severity: warning
-          slo: payment_creation_latency
-          slo_target: "p95<2s"
-        annotations:
-          summary: "Payment creation P95 latency SLO breached ({{ $value | printf \"%.2f\" }}s > 2s)"
-          description: >
-            The P95 latency for payment creation/verification requests has
-            exceeded the 2-second SLO target over the last 1 hour
-            (current: {{ $value | printf "%.2f" }}s).
-            Check payment_processing_duration_seconds and Stellar Horizon
-            response times for the bottleneck.
-
-      # ── SLO 3: Payment status polling P95 > 500ms ───────────────────────
-      - alert: PaymentPollingLatencySLOBreach
-        expr: job:payment_polling_latency_p95:rate1h > 0.5
-        for: 5m
-        labels:
-          severity: warning
-          slo: payment_polling_latency
-          slo_target: "p95<500ms"
-        annotations:
-          summary: "Payment polling P95 latency SLO breached ({{ $value | printf \"%.3f\" }}s > 500ms)"
-          description: >
-            The P95 latency for payment status polling requests has exceeded
-            the 500ms SLO target over the last 1 hour
-            (current: {{ printf "%.0f" (mul $value 1000) }}ms).
-            Check MongoDB query performance and index usage.
+          summary: "Payment error budget is burning rapidly"
+          runbook: "docs/runbooks/slo-burn-rate.md#payment-availability"
+          description: "Payment endpoints have exceeded the fast-burn error threshold."

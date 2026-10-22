@@ -8,6 +8,8 @@ import { getErrorMessage } from "../utils/errorMessages";
 import { IconAlertTriangle, IconCheck } from "../components/Icons";
 import PageHero from "../components/PageHero";
 import { useAdminAuthContext } from "../hooks/AdminAuthContext";
+import { useAbortController } from "../hooks/useAbortController";
+import TimestampDisplay, { DISPLAY_MODE } from "../components/TimestampDisplay";
 
 const EMPTY_FORM = { publicKey: "", label: "" };
 
@@ -32,15 +34,23 @@ export default function SourceValidationRules() {
   const [formError, setFormError]     = useState(null);
   const [formSuccess, setFormSuccess] = useState(false);
 
+  // Issue #254 — abort in-flight requests when the component unmounts to
+  // prevent stale responses from updating the wrong route's state.
+  const { signal } = useAbortController();
+
   const load = useCallback(() => {
     if (!schoolId) return;
     setLoading(true);
     setError(null);
-    getSourceValidationRules(schoolId)
+    getSourceValidationRules(schoolId, { signal })
       .then(({ data }) => setRules(data))
-      .catch(() => setError("Could not load source validation rules."))
+      .catch((err) => {
+        // Silently ignore requests cancelled on unmount or navigation.
+        if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") return;
+        setError("Could not load source validation rules.");
+      })
       .finally(() => setLoading(false));
-  }, [schoolId]);
+  }, [schoolId, signal]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -192,7 +202,7 @@ export default function SourceValidationRules() {
                     </td>
                     <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                       {rule.lastMatchedAt
-                        ? new Date(rule.lastMatchedAt).toLocaleDateString(undefined, { dateStyle: "medium" })
+                        ? <TimestampDisplay iso={rule.lastMatchedAt} mode={DISPLAY_MODE.UTC} dateOnly />
                         : "Never"}
                     </td>
                     <td style={{ textAlign: "right" }}>

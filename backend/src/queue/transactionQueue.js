@@ -82,7 +82,7 @@ if (!connection) {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: { age: 3600, count: 500 },
-        removeOnFail: false,
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 10000 },
       },
     });
   } catch (err) {
@@ -407,6 +407,8 @@ function startTransactionWorker(processor) {
       error: err.message,
     });
     transactionQueueFailedTotal.inc();
+    require('./deadLetterQueue').moveExhaustedJob(QUEUE_NAME, job, err)
+      .catch((dlqError) => logger.error('[TransactionQueue] Failed to move exhausted job to DLQ', { jobId: job?.id, error: dlqError.message }));
     if (job?.processedOn && job?.finishedOn) {
       transactionQueueProcessingDurationSeconds.observe((job.finishedOn - job.processedOn) / 1000);
     }

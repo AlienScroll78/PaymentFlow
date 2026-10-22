@@ -5,6 +5,8 @@ const { getRedisClient } = require('../config/redisClient');
 const { ReportJob, REPORT_STATUSES } = require('../models/reportJobModel');
 const logger = require('../utils/logger');
 const { randomUUID } = require('crypto');
+const sseService = require('../services/sseService');
+const paymentEvents = require('../events/paymentEvents');
 
 const QUEUE_NAME = 'report-generation';
 const REPORT_JOB_TTL_MS = parseInt(process.env.REPORT_JOB_TTL_MS || String(6 * 60 * 60 * 1000), 10);
@@ -25,7 +27,7 @@ function createQueue() {
         attempts: 2,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: { age: 3600, count: 100 },
-        removeOnFail: false,
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 10000 },
       },
     });
     return reportQueue;
@@ -40,6 +42,25 @@ async function enqueueReportJob(jobData) {
     const err = new Error('Report queue unavailable — Redis not configured');
     err.code = 'QUEUE_UNAVAILABLE';
     throw err;
+  }
+
+  // Deduplication: return an existing pending/processing job for the same
+  // school + type + date range instead of creating a duplicate.
+  const existingJob = await ReportJob.findOne({
+    schoolId: jobData.schoolId,
+    type: jobData.type || 'report',
+    status: { $in: [REPORT_STATUSES.PENDING, REPORT_STATUSES.PROCESSING] },
+    'params.startDate': jobData.startDate || null,
+    'params.endDate': jobData.endDate || null,
+  }).lean();
+
+  if (existingJob) {
+    logger.info('[ReportQueue] Returning existing job (deduplication)', {
+      jobId: existingJob.jobId,
+      type: jobData.type,
+      schoolId: jobData.schoolId,
+    });
+    return { jobId: existingJob.jobId, reportJob: existingJob, deduplicated: true };
   }
 
   const jobId = `report-${randomUUID()}`;
@@ -98,10 +119,38 @@ async function setJobProcessing(jobId) {
 }
 
 async function setJobCompleted(jobId, result) {
-  await ReportJob.findOneAndUpdate(
+  const updated = await ReportJob.findOneAndUpdate(
     { jobId, status: REPORT_STATUSES.PROCESSING },
-    { status: REPORT_STATUSES.COMPLETED, completedAt: new Date(), result }
-  );
+    { status: REPORT_STATUSES.COMPLETED, completedAt: new Date(), result },
+    { new: true }
+  ).lean();
+
+  // Notify SSE clients so they receive push completion rather than polling.
+  if (updated) {
+    try {
+      sseService.emit(updated.schoolId, 'report:completed', {
+        jobId: updated.jobId,
+        type: updated.type,
+        downloadUrl: `/api/reports/jobs/${updated.jobId}/download`,
+      });
+    } catch (err) {
+      // SSE delivery is best-effort; do not fail the job on SSE errors.
+      logger.warn('[ReportQueue] SSE emit failed after job completion', { jobId, error: err.message });
+    }
+
+    // Issue #362 — emit report.ready on the event bus so the notification
+    // subscriber creates an in-app notification for the school.
+    try {
+      paymentEvents.emit('report.ready', {
+        schoolId: updated.schoolId,
+        jobId: updated.jobId,
+        reportType: updated.type,
+        downloadUrl: `/api/reports/jobs/${updated.jobId}/download`,
+      });
+    } catch (err) {
+      logger.warn('[ReportQueue] report.ready event emit failed', { jobId, error: err.message });
+    }
+  }
 }
 
 async function setJobFailed(jobId, error) {
@@ -134,6 +183,8 @@ function startReportWorker(processor) {
       jobId: job?.id,
       error: err.message,
     });
+    require('./deadLetterQueue').moveExhaustedJob(QUEUE_NAME, job, err)
+      .catch((dlqError) => logger.error('[ReportQueue] Failed to move exhausted job to DLQ', { jobId: job?.id, error: dlqError.message }));
   });
 
   logger.info('[ReportQueue] Worker started', {
