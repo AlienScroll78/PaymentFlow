@@ -136,13 +136,15 @@ function TransactionRow({ index, style, data }) {
     <div
       style={{ ...style, boxSizing: "border-box", padding: "0 0 1px 0" }}
       role="row"
-      aria-rowindex={index + 2} // +2 because header row is row 1
+      aria-rowindex={index + 1}
     >
       <div
         className="pf-payment-item"
         role="gridcell"
         id={`transaction-grid-cell-${index}`}
         data-grid-cell-index={index}
+        data-grid-cell
+        aria-colindex={1}
         tabIndex={activeIndex === index ? 0 : -1}
         onFocus={() => onRowFocus(index)}
         style={{
@@ -262,7 +264,7 @@ function SortButton({ column, sort, onSort, label }) {
     <button
       onClick={() => onSort(column)}
       className="btn btn-sm btn-ghost"
-      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+      aria-pressed={active}
       style={{
         fontSize: "0.7rem",
         fontWeight: active ? 700 : 500,
@@ -301,6 +303,8 @@ export default function VirtualTransactionList({
   const listRef = useRef(null);
   const gridRef = useRef(null);
   const pendingFocusRef = useRef(null);
+  const focusedTransactionRef = useRef(null);
+  const gridHadFocusRef = useRef(false);
   const [activeIndex, setActiveIndex] = useState(0);
 
   const sortedPayments = useSortedTransactions(payments || [], sort);
@@ -312,6 +316,24 @@ export default function VirtualTransactionList({
     gridRef.current
       ?.querySelector(`[data-grid-cell-index="${index}"]`)
       ?.focus();
+  }, [activeIndex, sortedPayments]);
+
+  useEffect(() => {
+    if (!gridHadFocusRef.current || sortedPayments.length === 0) return;
+    const index = sortedPayments.findIndex(
+      (payment) => payment.txHash === focusedTransactionRef.current
+    );
+    if (index >= 0 && index !== activeIndex) {
+      pendingFocusRef.current = index;
+      setActiveIndex(index);
+      listRef.current?.scrollToItem(index, "smart");
+    } else if (index < 0) {
+      const nextIndex = Math.min(activeIndex, sortedPayments.length - 1);
+      pendingFocusRef.current = nextIndex;
+      focusedTransactionRef.current = sortedPayments[nextIndex]?.txHash;
+      setActiveIndex(nextIndex);
+      listRef.current?.scrollToItem(nextIndex, "smart");
+    }
   }, [activeIndex, sortedPayments]);
 
   const focusRow = useCallback((index) => {
@@ -343,8 +365,21 @@ export default function VirtualTransactionList({
       setDisputingTx(null);
       const index = sortedPayments.findIndex((payment) => payment.txHash === disputingTx);
       focusRow(index);
+    } else if (event.key === "Enter" || event.key === " ") {
+      const primaryAction = gridRef.current?.querySelector(
+        `[data-grid-cell-index="${activeIndex}"] button`
+      );
+      if (primaryAction) {
+        event.preventDefault();
+        primaryAction.click();
+      }
     }
   }, [activeIndex, disputingTx, focusRow, sortedPayments]);
+
+  const handleRowFocus = useCallback((index) => {
+    setActiveIndex(index);
+    focusedTransactionRef.current = sortedPayments[index]?.txHash;
+  }, [sortedPayments]);
 
   const handleSort = useCallback((column) => {
     setSort((prev) => ({
@@ -378,12 +413,12 @@ export default function VirtualTransactionList({
     onDisputeSuccess: handleDisputeSuccess,
     onDisputeCancel: handleDisputeCancel,
     activeIndex,
-    onRowFocus: setActiveIndex,
+    onRowFocus: handleRowFocus,
     t,
   }), [
     sortedPayments, disputedTxs, disputingTx, refunds, studentId,
     handleDisputeOpen, handleDisputeSuccess, handleDisputeCancel,
-    activeIndex, t,
+    activeIndex, handleRowFocus, t,
   ]);
 
   const rowCount = paymentsLoading
@@ -397,8 +432,8 @@ export default function VirtualTransactionList({
       {/* Sort controls */}
       {!paymentsLoading && sortedPayments.length > 1 && (
         <div
-          role="row"
-          aria-rowindex={1}
+          role="toolbar"
+          aria-label={t("paymentForm.sortBy")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -423,9 +458,17 @@ export default function VirtualTransactionList({
         role="grid"
         aria-colcount={1}
         aria-label={t("paymentForm.paymentHistory")}
-        aria-rowcount={rowCount + 1} // +1 for the header/sort row
+        aria-rowcount={rowCount}
         aria-busy={paymentsLoading}
         onKeyDown={handleGridKeyDown}
+        onFocusCapture={(event) => {
+          if (event.target.closest("[data-grid-cell]")) gridHadFocusRef.current = true;
+        }}
+        onBlur={(event) => {
+          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+            gridHadFocusRef.current = false;
+          }
+        }}
       >
         {paymentsLoading ? (
           <FixedSizeList
