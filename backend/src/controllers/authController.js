@@ -65,6 +65,21 @@ function makeRedisStore(client) {
     async delToken(token) {
       await client.del(`refresh:token:${hashToken(token)}`);
     },
+    async consumeToken(token, familyId, ttlSeconds) {
+      if (ttlSeconds <= 0) return null;
+      const tokenKey = `refresh:token:${hashToken(token)}`;
+      const consumedKey = `refresh:consumed:${hashToken(token)}`;
+      const script = [
+        "local token = redis.call('GET', KEYS[1])",
+        'if not token then return nil end',
+        "redis.call('DEL', KEYS[1])",
+        "redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])",
+        'return token',
+      ].join('\n');
+      const raw = await client.eval(script, 2, tokenKey, consumedKey, familyId, String(ttlSeconds));
+      if (!raw) return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    },
     // Family-level consumed tracking: record which familyId issued the most
     // recent token. This lets us detect any replay regardless of time elapsed.
     async markConsumed(token, familyId, ttlSeconds) {
@@ -82,23 +97,42 @@ function makeRedisStore(client) {
     },
     // Store the familyId → generation counter mapping so we can detect
     // whether an unknown token belongs to an active family.
-    async setTokenFamily(familyId, generation, ttlSeconds) {
+    async setTokenFamily(familyId, generation, ttlSeconds, expiresAt, userId = null) {
+      const RefreshTokenFamily = require('../models/refreshTokenFamilyModel');
+      const familyExpiry = expiresAt || new Date(Date.now() + ttlSeconds * 1000);
+      await RefreshTokenFamily.updateOne(
+        { familyId },
+        { $set: { generation, expiresAt: familyExpiry, userId } },
+        { upsert: true }
+      );
       await client.set(`refresh:family:${familyId}`, String(generation), 'EX', ttlSeconds);
     },
     async getTokenFamily(familyId) {
-      const v = await client.get(`refresh:family:${familyId}`);
-      return v !== null ? parseInt(v, 10) : null;
+      const RefreshTokenFamily = require('../models/refreshTokenFamilyModel');
+      const family = await RefreshTokenFamily.findOne({ familyId, expiresAt: { $gt: new Date() }, revokedAt: null })
+        .select('generation')
+        .lean();
+      return family?.generation ?? null;
     },
     async delTokenFamily(familyId) {
       await client.del(`refresh:family:${familyId}`);
     },
     async revokeFamily(familyId, ttlSeconds) {
-      await client.set(`refresh:revoked:${familyId}`, '1', 'EX', ttlSeconds);
-      // Remove the generation counter; the family is dead.
+      const RefreshTokenFamily = require('../models/refreshTokenFamilyModel');
+      const family = await RefreshTokenFamily.findOneAndUpdate(
+        { familyId },
+        { $set: { revokedAt: new Date() }, $setOnInsert: { generation: 1, expiresAt: new Date(Date.now() + ttlSeconds * 1000) } },
+        { upsert: true, new: true }
+      ).select('expiresAt').lean();
+      const remainingTtl = Math.max(1, Math.ceil((family.expiresAt.getTime() - Date.now()) / 1000));
+      await client.set(`refresh:revoked:${familyId}`, '1', 'EX', remainingTtl);
       await client.del(`refresh:family:${familyId}`);
     },
     async isFamilyRevoked(familyId) {
-      return (await client.exists(`refresh:revoked:${familyId}`)) === 1;
+      if ((await client.exists(`refresh:revoked:${familyId}`)) === 1) return true;
+      const RefreshTokenFamily = require('../models/refreshTokenFamilyModel');
+      const revoked = await RefreshTokenFamily.exists({ familyId, revokedAt: { $ne: null }, expiresAt: { $gt: new Date() } });
+      return Boolean(revoked);
     },
     async setSession(sessionId, data, ttlSeconds) {
       await client.set(`session:${sessionId}`, JSON.stringify(data), 'EX', ttlSeconds);
@@ -165,6 +199,17 @@ function makeMemoryStore() {
       return e.meta;
     },
     async delToken(token) { tokens.delete(hashToken(token)); },
+    async consumeToken(token, familyId, ttlSeconds) {
+      const tokenHash = hashToken(token);
+      const entry = tokens.get(tokenHash);
+      if (!alive(entry) || ttlSeconds <= 0) {
+        tokens.delete(tokenHash);
+        return null;
+      }
+      tokens.delete(tokenHash);
+      consumed.set(tokenHash, { familyId, exp: Date.now() + ttlSeconds * 1000 });
+      return entry.meta;
+    },
     async markConsumed(token, familyId, ttlSeconds = 300) {
       if (ttlSeconds && ttlSeconds > 0) {
         consumed.set(hashToken(token), { familyId, exp: Date.now() + ttlSeconds * 1000 });
@@ -175,8 +220,8 @@ function makeMemoryStore() {
       if (!alive(e)) { consumed.delete(hashToken(token)); return null; }
       return e.familyId;
     },
-    async setTokenFamily(familyId, generation, ttlSeconds) {
-      families.set(familyId, { generation, exp: Date.now() + ttlSeconds * 1000 });
+    async setTokenFamily(familyId, generation, ttlSeconds, expiresAt) {
+      families.set(familyId, { generation, exp: expiresAt ? new Date(expiresAt).getTime() : Date.now() + ttlSeconds * 1000 });
     },
     async getTokenFamily(familyId) {
       const e = families.get(familyId);
@@ -354,16 +399,18 @@ async function issueRefreshToken(store, jwtPayload, refreshTTL, req) {
   const familyId  = crypto.randomBytes(16).toString('hex');
   const sessionId = crypto.randomBytes(16).toString('hex');
   const refreshToken = crypto.randomBytes(40).toString('hex');
+  const familyExpiresAt = new Date(Date.now() + refreshTTL * 1000);
+  const tokenMeta = {
+    familyId,
+    sessionId,
+    ...jwtPayload,
+    familyExpiresAt: familyExpiresAt.toISOString(),
+  };
 
   // Store the hash of the token, never the raw value (#820 hash-storage).
-  await store.setToken(refreshToken, refreshTTL, { familyId, sessionId, ...jwtPayload });
+  await store.setToken(refreshToken, refreshTTL, tokenMeta);
 
-  // Initialise the family generation counter to 1. Each rotation increments
-  // this counter. An inbound token whose family has generation > 1 but no
-  // hash match is a replay from a prior generation.
-  await store.setTokenFamily(familyId, 1, refreshTTL).catch(err =>
-    logger.warn('[AuthController] Failed to init family generation counter', { error: err.message })
-  );
+  await store.setTokenFamily(familyId, 1, refreshTTL, familyExpiresAt, jwtPayload.userId || null);
 
   store.setSession(sessionId, {
     userId:     jwtPayload.userId   || null,
@@ -371,6 +418,7 @@ async function issueRefreshToken(store, jwtPayload, refreshTTL, req) {
     roles:      jwtPayload.roles    || [],
     schoolId:   jwtPayload.schoolId || null,
     familyId,
+    familyExpiresAt: familyExpiresAt.toISOString(),
     deviceInfo: extractDeviceInfo(req),
     createdAt:  new Date().toISOString(),
     lastUsed:   new Date().toISOString(),
@@ -622,34 +670,61 @@ async function handleRefresh(req, res) {
   const secret     = process.env.JWT_SECRET;
   const accessTTL  = parseTTL('JWT_ACCESS_TOKEN_TTL', 8 * 3600);
   const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
+  const familyExpiry = Number.isFinite(Date.parse(meta.familyExpiresAt))
+    ? new Date(meta.familyExpiresAt)
+    : new Date(Date.now() + refreshTTL * 1000);
+  const remainingTTL = Math.ceil((familyExpiry.getTime() - Date.now()) / 1000);
+  if (remainingTTL <= 0) {
+    await store.revokeFamily(meta.familyId, 1).catch(() => {});
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+    return res.status(401).json({ error: 'Refresh token family has expired.', code: 'INVALID_REFRESH_TOKEN' });
+  }
 
   const newRefreshToken = crypto.randomBytes(40).toString('hex');
 
   // ── Atomic rotation ───────────────────────────────────────────────────────
-  // Mark old token in the short-window consumed map (belt-and-suspenders for
-  // concurrent same-token requests in the next 300 s).
-  await store.markConsumed(refreshToken, meta.familyId, 300);
-  // Delete the old hash from the store.
-  await store.delToken(refreshToken);
+  // Atomically remove the old token and retain its family mapping until the
+  // family's fixed expiry so delayed replays revoke the active family too.
+  const consumedMeta = await store.consumeToken(refreshToken, meta.familyId, remainingTTL);
+  if (!consumedMeta) {
+    const consumedFamilyId = await store.getConsumedFamily(refreshToken).catch(() => null);
+    if (consumedFamilyId) {
+      await store.revokeFamily(consumedFamilyId, remainingTTL).catch(() => {});
+      res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+      return res.status(401).json({ error: 'Token reuse detected. Session revoked.', code: 'TOKEN_REUSE_DETECTED' });
+    }
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+    return res.status(401).json({ error: 'Invalid or expired refresh token.', code: 'INVALID_REFRESH_TOKEN' });
+  }
 
-  // Increment the family generation counter so any prior-generation token
-  // arriving later can be identified as a replay.
+  // Advance the family generation in persistent storage.
   const currentGen = await store.getTokenFamily(meta.familyId).catch(() => null);
   const nextGen = (currentGen ?? 1) + 1;
 
   try {
-    await store.setToken(newRefreshToken, refreshTTL, { ...meta, issuedAt: new Date().toISOString() });
-    await store.setTokenFamily(meta.familyId, nextGen, refreshTTL).catch(() => {});
+    await store.setToken(newRefreshToken, remainingTTL, {
+      ...meta,
+      familyExpiresAt: familyExpiry.toISOString(),
+      issuedAt: new Date().toISOString(),
+    });
+    await store.setTokenFamily(meta.familyId, nextGen, remainingTTL, familyExpiry, meta.userId || null);
   } catch (err) {
+    await store.delToken(newRefreshToken).catch(() => {});
     logger.error('[AuthController] Failed to persist rotated refresh token', { error: err.message });
     res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
     return res.status(500).json({ error: 'Authentication service unavailable.', code: 'TOKEN_STORE_ERROR' });
   }
 
+  if (await store.isFamilyRevoked(meta.familyId)) {
+    await store.delToken(newRefreshToken).catch(() => {});
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+    return res.status(401).json({ error: 'Token reuse detected. Session revoked.', code: 'TOKEN_REUSE_DETECTED' });
+  }
+
   // Update session lastUsed (non-critical)
   if (meta.sessionId) {
     store.getSession(meta.sessionId)
-      .then(sess => sess && store.setSession(meta.sessionId, { ...sess, lastUsed: new Date().toISOString() }, refreshTTL))
+      .then(sess => sess && store.setSession(meta.sessionId, { ...sess, lastUsed: new Date().toISOString() }, remainingTTL))
       .catch(() => logger.debug('[AuthController] session lastUsed update missed'));
   }
 
@@ -666,9 +741,9 @@ async function handleRefresh(req, res) {
 
   // Deliver via cookies only — no tokens in response body (#821)
   res.cookie(ACCESS_COOKIE, accessToken, accessCookieOptions(accessTTL));
-  res.cookie(REFRESH_COOKIE, newRefreshToken, refreshCookieOptions(refreshTTL));
+  res.cookie(REFRESH_COOKIE, newRefreshToken, refreshCookieOptions(remainingTTL));
 
-  return res.json({ expiresIn: accessTTL, refreshExpiresIn: refreshTTL });
+  return res.json({ expiresIn: accessTTL, refreshExpiresIn: remainingTTL });
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────
@@ -791,6 +866,22 @@ async function handleRevokeUserSessions(req, res) {
   } catch (err) {
     logger.error('[AuthController] Failed to revoke user sessions', { error: err.message });
     return res.status(500).json({ error: 'Failed to revoke user sessions.', code: 'SESSION_REVOKE_ERROR' });
+  }
+}
+
+async function handleRevokeOwnSessions(req, res) {
+  const userId = req.admin?.userId || req.user?.userId || req.admin?.sub || req.user?.sub;
+  if (!userId) return res.status(401).json({ error: 'Authenticated user is required.', code: 'UNAUTHORIZED' });
+
+  try {
+    const refreshTTL = parseTTL('JWT_REFRESH_TOKEN_TTL', 30 * 86400);
+    const revokedCount = await getStore().revokeUserSessions(userId, refreshTTL);
+    res.clearCookie(ACCESS_COOKIE, accessCookieOptions(0));
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
+    return res.json({ message: 'All sessions revoked.', revokedCount });
+  } catch (err) {
+    logger.error('[AuthController] Failed to revoke own sessions', { error: err.message });
+    return res.status(500).json({ error: 'Failed to revoke sessions.', code: 'SESSION_REVOKE_ERROR' });
   }
 }
 
@@ -921,6 +1012,7 @@ module.exports = {
   handleListSessions,
   handleRevokeSession,
   handleRevokeUserSessions,
+  handleRevokeOwnSessions,
   handleChangePassword,
   _resetStore,
   // Exported for tests only — allows verifying hash storage without touching Redis
