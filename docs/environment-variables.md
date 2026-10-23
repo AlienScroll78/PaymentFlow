@@ -161,7 +161,7 @@ The backend process **fails to start** when these are absent or invalid.
 |----------|---------|---------|---------|---------|------------|----------------|-------------------|
 | `PAYMENT_WEBHOOK_URL` | Backend | Legacy single-school outbound webhook URL | unset | `https://erp.school.com/webhook` | `RESTRICTED` | Integrations | On URL change |
 | `WEBHOOK_MAX_ATTEMPTS` | Backend | Max delivery attempts per webhook event | `3` | `3` | `INTERNAL` | Ops | N/A |
-| `WEBHOOK_DELIVERY_RETENTION_DAYS` | Backend | Days to retain delivery history | `90` | `90` | `INTERNAL` | Compliance | N/A |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | Backend | Days to retain delivery history | `30` | `30` | `INTERNAL` | Compliance | N/A |
 | `WEBHOOK_REPLAY_WINDOW_S` | Backend | Replay protection nonce TTL (seconds) | `300` | `300` | `INTERNAL` | Security | N/A |
 | `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` | Backend | Max age of inbound webhook timestamp | `300` | `300` | `INTERNAL` | Security | N/A |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Backend | Key that encrypts per-school HMAC secrets at rest | generated | *(32-char hex)* | `CRITICAL` | Security | Every 90 days |

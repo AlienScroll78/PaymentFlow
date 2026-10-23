@@ -280,6 +280,20 @@ async function _writeDeliveryLog({
       error: error || null,
       lastAttemptAt: new Date(),
     });
+
+    if (endpointId) {
+      const WebhookEndpoint = require('../models/webhookEndpointModel');
+      const attemptedAt = new Date();
+      await WebhookEndpoint.updateOne(
+        { _id: endpointId, schoolId },
+        success
+          ? { $set: { consecutiveFailures: 0, lastDeliveredAt: attemptedAt, lastStatusCode: statusCode || null } }
+          : {
+            $inc: { consecutiveFailures: 1 },
+            $set: { lastFailedAt: attemptedAt, lastStatusCode: statusCode || null },
+          }
+      );
+    }
   } catch (err) {
     logger.error('Failed to write webhook delivery log', {
       deliveryId, endpointId, error: err.message,
@@ -865,8 +879,8 @@ async function retryWebhook(retry) {
 
     // Record dead-letter metrics
     try {
-      const { recordDeliveryFailure, recordTerminalOutcome, refreshDeadLetterGauge } = require('../metrics/webhookMetrics');
-      recordDeliveryFailure(retry.event, 0, true, retry.schoolId || 'unknown', result.statusCode, result.error);
+      const { recordDeadLetter, recordTerminalOutcome, refreshDeadLetterGauge } = require('../metrics/webhookMetrics');
+      recordDeadLetter(retry.schoolId || 'unknown');
       recordTerminalOutcome(retry.event, 'dead_lettered');
       refreshDeadLetterGauge().catch(() => {});
     } catch (_) {}

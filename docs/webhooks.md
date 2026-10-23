@@ -516,7 +516,7 @@ Set `isActive: false` to pause an endpoint without deleting it.
 
 ## Delivery History & Replay
 
-Every delivery attempt is logged with status code, response body (truncated to 1 KB), duration, and error details. Logs are retained for **90 days** (configurable via `WEBHOOK_DELIVERY_RETENTION_DAYS`).
+Every delivery attempt is logged with status code, response body (truncated to 1 KB), duration, and error details. Logs are retained for **30 days** by default (configurable via `WEBHOOK_DELIVERY_RETENTION_DAYS`).
 
 ```
 GET  /api/webhook-deliveries?endpointId=<id>&page=1&limit=20

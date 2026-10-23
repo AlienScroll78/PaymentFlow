@@ -41,7 +41,7 @@ const { archiveAuditLogs } = require('./auditService');
 const DEFAULTS = {
   studentPii:        2555,
   paymentMemos:      1825,
-  webhookDeliveries: 90,
+  webhookDeliveries: 30,
   webhookRetries:    30,
   emailDeliveries:   90,
   reportJobs:        7,

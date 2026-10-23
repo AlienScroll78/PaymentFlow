@@ -7,7 +7,7 @@ const mongoose = require('mongoose');
  *
  * Each document represents ONE delivery attempt (initial or retry) of a
  * webhook payload to a WebhookEndpoint. Records are auto-expired after
- * WEBHOOK_DELIVERY_TTL_SECONDS (default 90 days = 7 776 000 s).
+ * WEBHOOK_DELIVERY_TTL_SECONDS (default 30 days = 2 592 000 s).
  *
  * Replaces the old replay-only WebhookDelivery schema (which stored only
  * deliveryId + receivedAt). Replay protection is now handled by the
@@ -112,7 +112,7 @@ webhookDeliverySchema.index({ schoolId: 1, success: 1, attemptCount: 1 });
 // WEBHOOK_DELIVERY_RETENTION_DAYS is the documented knob; the older
 // WEBHOOK_DELIVERY_TTL_SECONDS still wins when set, so a deployment that
 // already configured it does not silently change retention on upgrade.
-const DEFAULT_RETENTION_DAYS = 90;
+const DEFAULT_RETENTION_DAYS = 30;
 
 function resolveTtlSeconds() {
   const seconds = parseInt(process.env.WEBHOOK_DELIVERY_TTL_SECONDS, 10);

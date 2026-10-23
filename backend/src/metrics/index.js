@@ -292,9 +292,33 @@ const horizonRequestDurationSeconds = new client.Histogram({
 // outcomes: 'success' (HTTP 2xx), 'failure' (error or non-2xx), 'retry' (queued for retry).
 const webhookDeliveryTotal = new client.Counter({
   name: 'webhook_delivery_total',
-  help: 'Number of webhook delivery attempts grouped by outcome (success, failure, retry)',
-  labelNames: ['outcome'],
+  help: 'Number of webhook delivery attempts grouped by status',
+  labelNames: ['status'],
   registers: [registry],
+});
+
+const webhookEndpointConsecutiveFailures = new client.Gauge({
+  name: 'webhook_endpoint_consecutive_failures',
+  help: 'Current consecutive failure count for each webhook endpoint',
+  labelNames: ['school_id', 'endpoint_id'],
+  registers: [registry],
+  async collect() {
+    try {
+      const WebhookEndpoint = require('../models/webhookEndpointModel');
+      const endpoints = await WebhookEndpoint.find({ consecutiveFailures: { $gt: 0 } })
+        .select('schoolId consecutiveFailures')
+        .lean();
+      this.reset();
+      for (const endpoint of endpoints) {
+        this.set(
+          { school_id: endpoint.schoolId, endpoint_id: String(endpoint._id) },
+          endpoint.consecutiveFailures || 0
+        );
+      }
+    } catch (_) {
+      // Database may be unavailable during startup; keep the scrape healthy.
+    }
+  },
 });
 
 // notification_sent_total{channel} — counts outbound notifications by channel.
@@ -625,6 +649,7 @@ module.exports = {
   paymentFunnelTotal,
   horizonRequestDurationSeconds,
   webhookDeliveryTotal,
+  webhookEndpointConsecutiveFailures,
   notificationSentTotal,
   backupLastSuccessTimestamp,
   horizonUnreachableSince,

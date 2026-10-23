@@ -187,7 +187,7 @@ function WebhooksPage() {
           </div>
           <div className="card-body">
             {loading ? (
-              <SkeletonTable columns={["100%", 70, 65, 100, 60]} rows={5} className="table table-sm" />
+              <SkeletonTable columns={["100%", 70, 65, 110, 70, 110, 60]} rows={5} className="table table-sm" />
             ) : endpoints.length === 0 ? (
               <EmptyState
                 variant="empty"
@@ -203,6 +203,8 @@ function WebhooksPage() {
                       <th>{t("webhooks.colEvents")}</th>
                       <th>{t("webhooks.colStatus")}</th>
                       <th>{t("webhooks.colLastDelivery")}</th>
+                      <th>{t("webhooks.colSuccessRate")}</th>
+                      <th>{t("webhooks.colLastFailure")}</th>
                       <th>{t("webhooks.colActions")}</th>
                     </tr>
                   </thead>
@@ -221,7 +223,13 @@ function WebhooksPage() {
                           </span>
                         </td>
                         <td>
-                          <small>{timeAgo(ep.lastDeliveredAt || ep.createdAt, t)}</small>
+                          <small>{ep.deliveryStats?.lastDeliveryAt ? timeAgo(ep.deliveryStats.lastDeliveryAt, t) : t("webhooks.noDeliveries")}</small>
+                        </td>
+                        <td>
+                          <small>{ep.deliveryStats?.successRate == null ? t("webhooks.noDeliveries") : `${ep.deliveryStats.successRate}%`}</small>
+                        </td>
+                        <td>
+                          <small>{ep.deliveryStats?.lastFailureAt ? timeAgo(ep.deliveryStats.lastFailureAt, t) : t("webhooks.neverFailed")}</small>
                         </td>
                         <td>
                           <div className="btn-group btn-group-sm">

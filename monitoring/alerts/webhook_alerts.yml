@@ -1,6 +1,19 @@
 groups:
   - name: webhook_alerts
     rules:
+      - alert: WebhookEndpointConsecutiveFailures
+        expr: webhook_endpoint_consecutive_failures >= 10
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Webhook endpoint has 10 consecutive failures"
+          description: >
+            Endpoint {{ $labels.endpoint_id }} for school {{ $labels.school_id }}
+            has failed {{ $value }} consecutive delivery attempts. Check the
+            endpoint configuration and recent delivery history.
+          runbook_url: "https://github.com/onlyonee1/PaymentFlow/blob/main/docs/WEBHOOK_INTEGRATION.md"
+
       # Alert when more than 20% of webhook deliveries are failing over a 5-minute window
       - alert: WebhookHighFailureRate
         expr: |

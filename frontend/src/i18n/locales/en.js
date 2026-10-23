@@ -493,7 +493,11 @@ const en = {
     colEvents: "Events",
     colStatus: "Status",
     colLastDelivery: "Last Delivery",
+    colSuccessRate: "Success Rate (30d)",
+    colLastFailure: "Last Failure",
     colActions: "Actions",
+    noDeliveries: "No attempts",
+    neverFailed: "Never",
     eventsCount: "{{count}} events",
     event: {
       "payment.confirmed": "Payment Confirmed",
