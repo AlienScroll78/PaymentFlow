@@ -8,6 +8,7 @@ const { Readable } = require('stream');
 const { logAudit } = require('../services/auditService');
 const { encryptStudentPii, decryptStudentPii, hashParentEmail } = require('../services/studentPiiEncryption');
 const { encodeListCursor, decodeListCursor, cursorCondition } = require('../utils/listCursor');
+const { validateDecimalAmount } = require('../utils/decimalPrecision');
 
 async function registerStudent(req, res, next) {
   // Declared in the function scope (not inside try) so the 11000 duplicate-key
@@ -440,7 +441,11 @@ async function updateStudent(req, res, next) {
         update.feeAmount = feeStructure.feeAmount;
       }
     }
-    if (feeAmount !== undefined) update.feeAmount = feeAmount;
+    if (feeAmount !== undefined) {
+      const amount = validateDecimalAmount(feeAmount, { minValue: 0.01 });
+      if (!amount.ok) return res.status(400).json({ error: amount.error, code: amount.code });
+      update.feeAmount = amount.value.toNumber();
+    }
     if (reminderOptOut !== undefined) update.reminderOptOut = Boolean(reminderOptOut);
     if (graduatedAt !== undefined) update.graduatedAt = graduatedAt;
 
@@ -642,10 +647,10 @@ function validateStudentRow(row) {
 
   // feeAmount: optional, but if provided must be a positive number
   if (row.feeAmount != null && row.feeAmount !== '') {
-    const n = Number(row.feeAmount);
-    if (!Number.isFinite(n) || n <= 0) {
-      errors.push('feeAmount must be a positive number');
-      fieldErrors.push({ field: 'feeAmount', error: 'feeAmount must be a positive number' });
+    const amount = validateDecimalAmount(row.feeAmount, { minValue: 0.01 });
+    if (!amount.ok) {
+      errors.push(amount.error);
+      fieldErrors.push({ field: 'feeAmount', error: amount.error });
     }
   }
 

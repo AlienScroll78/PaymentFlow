@@ -10,6 +10,7 @@
  */
 
 const Joi = require('joi');
+const { decimalAmountJoi } = require('../../utils/decimalPrecision');
 
 // ── Pagination ────────────────────────────────────────────────────────────────
 
@@ -75,8 +76,8 @@ const updateStudentSchema = Joi.object({
     }),
   class:        Joi.string().trim().min(1).max(100).optional()
     .messages({ 'string.max': '"class" must not exceed 100 characters' }),
-  feeAmount:    Joi.number().positive().optional()
-    .messages({ 'number.positive': '"feeAmount" must be a positive number' }),
+  feeAmount:    decimalAmountJoi({ minValue: 0.01 }).optional()
+    .messages({ 'any.invalid': '"feeAmount" must be a positive amount with at most 2 decimal places' }),
   graduatedAt:  Joi.date().iso().optional().allow(null),
   parentEmail:  Joi.string().email().max(254).optional().allow(null, '')
     .messages({ 'string.max': '"parentEmail" must not exceed 254 characters' }),
@@ -97,7 +98,7 @@ const registerStudentSchema = Joi.object({
   studentId:    Joi.string().trim().max(28).optional(),
   name:         Joi.string().trim().min(1).max(200).required(),
   class:        Joi.string().trim().min(1).max(100).required(),
-  feeAmount:    Joi.number().positive().optional(),
+  feeAmount:    decimalAmountJoi({ minValue: 0.01 }).optional(),
   parentEmail:  Joi.string().email().max(254).optional().allow('', null),
   parentPhone:  Joi.string().max(30).optional().allow('', null),
 }).unknown(false);

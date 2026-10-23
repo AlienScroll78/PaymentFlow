@@ -26,7 +26,7 @@ function normaliseFeeAmount(raw, next) {
     return null;
   }
   // Store as Number (BSON double).  Precision is guaranteed by validateDecimalAmount
-  // because we only reach here when actualDp <= 7 and the value is within range.
+  // because we only reach here when actualDp <= 2 and the value is within range.
   return result.value.toNumber();
 }
 

@@ -3,6 +3,7 @@
 'use strict';
 
 const Joi = require('joi');
+const { validateDecimalAmount } = require('../utils/decimalPrecision');
 
 const {
   createPaymentIntentSchema,
@@ -55,11 +56,6 @@ const STUDENT_ID_RE = /^[\w-]{1,28}$/;
 
 function validStudentId(id) {
   return typeof id === 'string' && STUDENT_ID_RE.test(id);
-}
-
-function validPositiveNumber(val) {
-  const n = Number(val);
-  return Number.isFinite(n) && n > 0;
 }
 
 function validTxHash(hash) {
@@ -133,7 +129,8 @@ function validateFeeStructure(req, res, next) {
   const errors = [];
 
   if (!className || typeof className !== 'string' || !className.trim()) errors.push('className is required');
-  if (!validPositiveNumber(feeAmount)) errors.push('feeAmount must be a positive number');
+  const amount = validateDecimalAmount(feeAmount, { minValue: 0.01 });
+  if (!amount.ok) errors.push(amount.error);
 
   if (errors.length) return res.status(400).json({ errors });
   return next();

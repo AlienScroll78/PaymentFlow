@@ -55,7 +55,7 @@ const CURRENCY_RULES = {
 };
 
 /** Default rule applied when no currency code is given. */
-const DEFAULT_MAX_DECIMAL_PLACES = 7;
+const DEFAULT_MAX_DECIMAL_PLACES = 2;
 
 // ── Core validation ───────────────────────────────────────────────────────────
 
@@ -207,7 +207,24 @@ function toStroops(majorUnits) {
  */
 function fromStroops(stroops) {
   const d = new Decimal(String(stroops)).div(STROOPS_PER_UNIT);
-  return toDecimalString(d);
+  return toDecimalString(d, CURRENCY_RULES.XLM.maxDecimalPlaces);
+}
+
+function toMinorUnits(value, decimalPlaces = DEFAULT_MAX_DECIMAL_PLACES) {
+  const amount = new Decimal(String(value));
+  const minorUnits = amount.times(new Decimal(10).pow(decimalPlaces));
+  if (!minorUnits.isInteger()) {
+    throw new RangeError(`Amount ${value} exceeds the supported ${decimalPlaces}-decimal precision`);
+  }
+  return minorUnits.toFixed(0);
+}
+
+function fromMinorUnits(value, decimalPlaces = DEFAULT_MAX_DECIMAL_PLACES) {
+  return new Decimal(String(value)).div(new Decimal(10).pow(decimalPlaces)).toFixed(decimalPlaces);
+}
+
+function toFixedDecimalString(value, decimalPlaces = DEFAULT_MAX_DECIMAL_PLACES) {
+  return new Decimal(String(value)).toFixed(decimalPlaces);
 }
 
 // ── Joi custom validator ──────────────────────────────────────────────────────
@@ -251,5 +268,8 @@ module.exports = {
   toDecimalString,
   toStroops,
   fromStroops,
+  toMinorUnits,
+  fromMinorUnits,
+  toFixedDecimalString,
   decimalAmountJoi,
 };

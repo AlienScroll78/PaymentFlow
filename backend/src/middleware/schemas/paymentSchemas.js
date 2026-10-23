@@ -47,7 +47,7 @@ const MIN_AMOUNT = 1.0;
  * Uses decimalAmountJoi() so the same rules apply to the fee controller and any
  * future endpoint that accepts monetary values.
  */
-const stellarAmount = decimalAmountJoi({ minValue: MIN_AMOUNT })
+const stellarAmount = decimalAmountJoi({ currency: 'XLM', minValue: MIN_AMOUNT })
   .messages({
     'any.required': '"amount" is required',
     'any.invalid':  '"amount" {{#reason}}',
