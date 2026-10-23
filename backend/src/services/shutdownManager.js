@@ -113,6 +113,10 @@ async function closeQueues() {
       const reportQueue = require('./reportQueueService');
       if (reportQueue.stopWorker) await reportQueue.stopWorker();
     }},
+    { name: 'studentImportQueue', fn: async () => {
+      const studentImportQueue = require('./studentImportQueueService');
+      if (studentImportQueue.stopWorker) await studentImportQueue.stopWorker();
+    }},
     { name: 'genericDeadLetterQueues', fn: async () => {
       const deadLetterQueue = require('../queue/deadLetterQueue');
       if (deadLetterQueue.closeDeadLetterQueues) await deadLetterQueue.closeDeadLetterQueues();

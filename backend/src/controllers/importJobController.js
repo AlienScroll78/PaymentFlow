@@ -52,6 +52,7 @@ async function getImportJobStatus(req, res, next) {
       totalRows: job.totalRows,
       processedRows: job.processedRows,
       createdRows: job.createdRows,
+      succeededRows: job.createdRows,
       failedRows: job.failedRows,
       progressPercent,
       errors: job.errors || [],

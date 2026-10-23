@@ -57,6 +57,7 @@ const importJobSchema = new mongoose.Schema(
       {
         row: { type: Number },
         studentId: { type: String, default: null },
+        field: { type: String, default: null },
         error: { type: String },
         code: { type: String },
         _id: false,

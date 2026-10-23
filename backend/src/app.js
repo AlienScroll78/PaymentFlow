@@ -61,6 +61,7 @@ const { startOutboxDispatcher, stopOutboxDispatcher } = require('./services/outb
 const { startReconciliationReportScheduler, stopReconciliationReportScheduler } = require('./services/reconciliationReportScheduler');
 const { startJobRecoveryScheduler, stopJobRecoveryScheduler } = require('./services/jobRecoveryScheduler');
 const { startWorker: startReportQueueWorker, stopWorker: stopReportQueueWorker } = require('./services/reportQueueService');
+const { startWorker: startStudentImportWorker } = require('./services/studentImportQueueService');
 const { close: closeReportCacheInvalidator } = require('./services/reportCacheInvalidator');
 const { closeQueue } = require('./queue/transactionQueue');
 const bullMQRetryService = require('./services/bullMQRetryService');
@@ -345,6 +346,7 @@ connectDatabase().then(async () => {
    registerPaymentSavedSubscribers();
    startOutboxDispatcher();
    startReportQueueWorker();
+  startStudentImportWorker();
 
   // Only initialise BullMQ when Redis is configured
   if (retrySelector.useBullMQ()) {

@@ -656,6 +656,46 @@ function validateStudentRow(row) {
 async function bulkImportStudents(req, res, next) {
   try {
     const { schoolId } = req;
+    if (req.csvFileId) {
+      if (!req.csvRowCount) {
+        const mongoose = require('mongoose');
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'studentImports' });
+        await bucket.delete(req.csvFileId).catch(() => {});
+        return res.status(400).json({ error: 'No student records found in input', code: 'VALIDATION_ERROR' });
+      }
+
+      const ImportJob = require('../models/importJobModel');
+      const { enqueueStudentImport } = require('../queue/studentImportQueue');
+      const jobId = require('crypto').randomUUID();
+      await ImportJob.create({ jobId, schoolId, totalRows: req.csvRowCount, status: 'pending' });
+
+      try {
+        await enqueueStudentImport({ jobId, schoolId, fileId: String(req.csvFileId) });
+      } catch (queueError) {
+        await ImportJob.updateOne({ jobId }, { status: 'failed', completedAt: new Date(), failureReason: queueError.message });
+        const mongoose = require('mongoose');
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'studentImports' });
+        await bucket.delete(req.csvFileId).catch(() => {});
+        return res.status(503).json({ error: 'Student import queue is unavailable', code: 'QUEUE_UNAVAILABLE' });
+      }
+
+      if (req.auditContext) {
+        await logAudit({
+          schoolId,
+          action: 'student_bulk_import',
+          performedBy: req.auditContext.performedBy,
+          targetId: jobId,
+          targetType: 'student_import_job',
+          details: { total: req.csvRowCount, status: 'pending' },
+          result: 'success',
+          ipAddress: req.auditContext.ipAddress,
+          userAgent: req.auditContext.userAgent,
+        });
+      }
+
+      return res.status(202).json({ jobId, status: 'pending', totalRows: req.csvRowCount });
+    }
+
     let rows;
 
     if (req.parsedRows) {
